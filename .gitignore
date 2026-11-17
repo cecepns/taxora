@@ -1,0 +1,11 @@
+node_modules
+dist
+build
+.cache
+*.log
+.env
+.DS_Store
+.idea
+.vscode
+backend/uploads-taxora/*
+!backend/uploads-taxora/.gitkeep
