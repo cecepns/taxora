@@ -14,6 +14,7 @@ import {
   Link2,
   MapPin,
   RotateCcw,
+  Trash2,
   X,
 } from "lucide-react";
 import DataTable from "@/components/DataTable";
@@ -66,6 +67,8 @@ export default function Monitoring() {
 
   const [reasonModal, setReasonModal] = useState(null);
   const [reason, setReason] = useState("");
+  const [deleteModal, setDeleteModal] = useState(null);
+  const [deleteReason, setDeleteReason] = useState("");
   const [detailModal, setDetailModal] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
   const [shareLink, setShareLink] = useState(null);
@@ -74,10 +77,15 @@ export default function Monitoring() {
 
   const t = usePaginated(API_ENDPOINTS.PRESENSI.LIST, { year, month, status, date, programId: pid });
 
-  useEffect(() => {
+  const loadSummary = () => {
     request("get", API_ENDPOINTS.PRESENSI.MONITORING_SUMMARY, { year, month, date, programId: pid }).then((r) =>
       setSummary(r?.data || null)
     );
+  };
+
+  useEffect(() => {
+    loadSummary();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month, date, pid]);
 
   const openDetail = async (row) => {
@@ -136,6 +144,26 @@ export default function Monitoring() {
     if (action === "setujui") return submitVerify(row.id, "setujui", "");
     setReason("");
     setReasonModal({ id: row.id, name: row.name, action });
+  };
+
+  const confirmDelete = async (e) => {
+    e.preventDefault();
+    if (!deleteModal) return;
+    if (!deleteReason.trim()) return toast.error("Alasan penghapusan wajib diisi");
+    setBusy(true);
+    const r = await request(
+      "delete",
+      API_ENDPOINTS.PRESENSI.DELETE(deleteModal.id),
+      { reason: deleteReason.trim() },
+      { success: true }
+    );
+    setBusy(false);
+    if (r) {
+      setDeleteModal(null);
+      setDeleteReason("");
+      t.reload();
+      loadSummary();
+    }
   };
 
   const ev = (r, f, ok) =>
@@ -311,6 +339,19 @@ export default function Monitoring() {
                 >
                   <X size={15} />
                 </button>
+                {isAdmin && (
+                  <button
+                    type="button"
+                    title="Hapus presensi"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-600 text-white hover:bg-rose-700"
+                    onClick={() => {
+                      setDeleteReason("");
+                      setDeleteModal(r);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             ),
           },
@@ -503,6 +544,38 @@ export default function Monitoring() {
             <button type="button" className="btn-ghost" onClick={() => setReasonModal(null)}>Batal</button>
             <button type="submit" disabled={busy} className={reasonModal?.action === "tolak" ? "btn-danger" : "btn"}>
               {busy ? "Menyimpan..." : "Kirim"}
+            </button>
+          </div>
+        </form>
+      </Modal>
+      {/* Modal Konfirmasi Hapus Presensi (Khusus Admin) */}
+      <Modal
+        open={!!deleteModal}
+        title="Hapus Data Presensi"
+        subtitle={deleteModal ? `${deleteModal.name} (${deleteModal.nim}) • ${deleteModal.date} Sesi ${deleteModal.session_no}` : ""}
+        onClose={() => setDeleteModal(null)}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={confirmDelete} className="space-y-4">
+          <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3.5 text-xs leading-relaxed text-rose-800">
+            Data presensi beserta seluruh file foto dan bukti unggahan akan <strong>dihapus permanen dari server</strong>. Relawan dapat melakukan presensi ulang pada sesi ini bila periode masih terbuka.
+          </div>
+          <div>
+            <label className="label">Alasan Penghapusan *</label>
+            <input
+              className="input"
+              placeholder="Contoh: Presensi uji coba / foto salah"
+              value={deleteReason}
+              onChange={(e) => setDeleteReason(e.target.value)}
+              required
+              autoFocus
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setDeleteModal(null)}>Batal</button>
+            <button type="submit" className="btn-danger" disabled={busy}>
+              <Trash2 size={15} />
+              {busy ? "Menghapus..." : "Ya, Hapus"}
             </button>
           </div>
         </form>

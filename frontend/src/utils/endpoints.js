@@ -22,6 +22,7 @@ export const API_ENDPOINTS = {
     START: "/presensi/start",
     FINISH: (id) => `/presensi/${id}/finish`,
     DETAIL: (id) => `/presensi/${id}/detail`,
+    DELETE: (id) => `/presensi/${id}`,
     CORRECT: (id) => `/presensi/${id}/correct`,
     VERIFY: (id) => `/presensi/${id}/verify`,
     EVIDENCE: (id, f) => `/evidence/${id}/${f}`,

@@ -576,6 +576,12 @@ app.delete("/api/relawan/:id", auth("pengurus", "admin"), ah(async (q, s) => {
 
   const [[{ leftMem }]] = await db.query("SELECT COUNT(*) leftMem FROM memberships WHERE user_id=?", [uid]);
   if (!leftMem) {
+    const [atts] = await db.query("SELECT id, photo, ev_excel, ev_bpe, ev_report FROM attendance WHERE user_id=?", [uid]);
+    for (const a of atts) {
+      [a.photo, a.ev_excel, a.ev_bpe, a.ev_report].forEach(safeUnlink);
+      await db.query("DELETE FROM evidence_tokens WHERE attendance_id=?", [a.id]);
+      await db.query("DELETE FROM attendance_revisions WHERE attendance_id=?", [a.id]);
+    }
     await db.query("DELETE FROM attendance WHERE user_id=?", [uid]);
     await db.query("DELETE FROM assignments WHERE user_id=?", [uid]);
     await db.query("UPDATE assignments SET replaced_by=NULL WHERE replaced_by=?", [uid]);
@@ -867,6 +873,57 @@ app.put("/api/presensi/:id/verify", auth("pengurus", "koordinator", "admin"), ah
   await audit(q.u, b.program_id, "verify", "presensi", +q.params.id, { status: b.status }, { status: st }, reason);
   await markFinalReportStale(b.program_id, b.date);
   s.json({ success: true });
+}));
+
+function safeUnlink(filePath) {
+  if (!filePath) return;
+  try {
+    const resolved = path.resolve(filePath);
+    if (fs.existsSync(resolved)) fs.unlinkSync(resolved);
+  } catch (e) {
+    console.error("Gagal menghapus file:", filePath, e.message);
+  }
+}
+
+app.delete("/api/presensi/:id", auth("admin"), ah(async (q, s) => {
+  const id = +q.params.id;
+  const reason = clean(q.body?.reason || q.query.reason) || "Hapus data presensi";
+  const [[a]] = await db.query(
+    "SELECT a.*, s.date, s.year FROM attendance a JOIN sessions s ON s.id=a.session_id WHERE a.id=?",
+    [id]
+  );
+  if (!a) return fail(s, 404, "Data presensi tidak ditemukan");
+  if (await isClosed(a.program_id, a.year)) return fail(s, 423, "Periode sudah ditutup");
+
+  // Kumpulkan semua file bukti & foto (termasuk versi lama di riwayat revisi) lalu unlink dari disk
+  const filesToDelete = new Set([a.photo, a.ev_excel, a.ev_bpe, a.ev_report].filter(Boolean));
+  const [revs] = await db.query("SELECT before_val FROM attendance_revisions WHERE attendance_id=?", [id]);
+  for (const rev of revs) {
+    try {
+      const bv = typeof rev.before_val === "string" ? JSON.parse(rev.before_val) : rev.before_val;
+      if (bv) {
+        [bv.photo, bv.ev_excel, bv.ev_bpe, bv.ev_report].filter(Boolean).forEach((fp) => filesToDelete.add(fp));
+      }
+    } catch {}
+  }
+  for (const fp of filesToDelete) safeUnlink(fp);
+
+  await db.query("DELETE FROM evidence_tokens WHERE attendance_id=?", [id]);
+  await db.query("DELETE FROM attendance_revisions WHERE attendance_id=?", [id]);
+  await db.query("DELETE FROM attendance WHERE id=?", [id]);
+
+  await audit(
+    q.u,
+    a.program_id,
+    "delete",
+    "presensi",
+    id,
+    { user_id: a.user_id, session_id: a.session_id, date: a.date, wp_count: a.wp_count, status: a.status },
+    null,
+    reason
+  );
+  await markFinalReportStale(a.program_id, a.date);
+  s.json({ success: true, message: "Data presensi dan file bukti berhasil dihapus" });
 }));
 
 app.get("/api/evidence/:id/:field", auth(), ah(async (q, s) => {
