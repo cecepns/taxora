@@ -257,7 +257,7 @@ const auth = (...roles) => (q, s, n) => {
     const raw = (q.headers.authorization || "").startsWith("Bearer ")
       ? q.headers.authorization.slice(7)
       : q.query.token || "";
-    q.u = jwt.verify(raw, process.env.JWT_SECRET);
+    q.u = jwt.verify(raw, process.env.JWT_SECRET || "taxora");
   } catch {
     return fail(s, 401, "Sesi berakhir, silakan login ulang");
   }
@@ -386,7 +386,7 @@ app.post("/api/auth/login", ah(async (q, s) => {
   }
   const user = { id: u.id, nim: u.nim, name: u.name, role: u.role, programId: pid, programName, mustChange: !!u.must_change };
   await audit(user, pid, "login", "akun", user.id, null, { role: user.role, program: programName }, "Login ke sistem");
-  s.json({ success: true, token: jwt.sign(user, process.env.JWT_SECRET, { expiresIn: "12h" }), user });
+  s.json({ success: true, token: jwt.sign(user, process.env.JWT_SECRET || "taxora", { expiresIn: "12h" }), user });
 }));
 
 app.post("/api/auth/change-password", auth(), ah(async (q, s) => {
@@ -1249,6 +1249,31 @@ app.get("/api/materi/:id/download", auth(), ah(async (q, s) => {
   if (!targetPath || !fs.existsSync(path.resolve(targetPath))) return fail(s, 404, "File tidak ditemukan");
   await audit(q.u, mat.program_id, "download-materi", "materi", mat.id, null, { title: mat.title, versionId }, "Unduh materi/panduan");
   s.sendFile(path.resolve(targetPath));
+}));
+
+app.delete("/api/materi/:id", auth("pengurus", "admin"), ah(async (q, s) => {
+  const id = +q.params.id;
+  const [[mat]] = await db.query("SELECT * FROM materials WHERE id=?", [id]);
+  if (!mat || (q.u.role !== "admin" && mat.program_id !== q.u.programId)) return fail(s, 404, "Materi tidak ditemukan");
+
+  const filesToDelete = new Set([mat.file_path].filter(Boolean));
+  const [vers] = await db.query("SELECT file_path FROM material_versions WHERE material_id=?", [id]);
+  vers.forEach((v) => { if (v.file_path) filesToDelete.add(v.file_path); });
+  for (const fp of filesToDelete) safeUnlink(fp);
+
+  await db.query("DELETE FROM material_versions WHERE material_id=?", [id]);
+  await db.query("DELETE FROM materials WHERE id=?", [id]);
+  await audit(
+    q.u,
+    mat.program_id,
+    "delete",
+    "materi",
+    id,
+    { title: mat.title, category: mat.category, version: mat.version },
+    null,
+    clean(q.body?.reason || q.query.reason) || "Hapus materi/panduan"
+  );
+  s.json({ success: true, message: `Materi "${mat.title}" dan file terkait berhasil dihapus` });
 }));
 
 // ---------- pengaturan & periode ----------

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarDays, Camera, CheckCircle2, ClipboardCheck, Clock, Eye, MapPin, Send, Upload } from "lucide-react";
+import { CalendarDays, Camera, CheckCircle2, ClipboardCheck, Clock, Eye, Loader2, MapPin, Send, Upload } from "lucide-react";
 import DataTable from "@/components/DataTable";
 import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
@@ -23,6 +23,7 @@ export default function Presensi() {
   const riwayat = usePaginated(API_ENDPOINTS.PRESENSI.LIST);
   const [settings, setSettings] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [loadingEv, setLoadingEv] = useState("");
   const [camSession, setCamSession] = useState(null);
   const [fin, setFin] = useState(null);
 
@@ -64,15 +65,23 @@ export default function Presensi() {
     }
   };
 
+  const handleOpenEvidence = async (id, field) => {
+    const key = `${id}-${field}`;
+    setLoadingEv(key);
+    await openEvidence(API_ENDPOINTS.PRESENSI.EVIDENCE(id, field));
+    setLoadingEv("");
+  };
+
   const ev = (r, f, ok) =>
     ok ? (
       <button
         type="button"
         key={f}
-        className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand transition hover:bg-brand hover:text-white"
-        onClick={() => openEvidence(API_ENDPOINTS.PRESENSI.EVIDENCE(r.id, f))}
+        disabled={loadingEv === `${r.id}-${f}`}
+        className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-0.5 text-[11px] font-semibold text-brand transition hover:bg-brand hover:text-white disabled:opacity-60"
+        onClick={() => handleOpenEvidence(r.id, f)}
       >
-        <Eye size={11} />
+        {loadingEv === `${r.id}-${f}` ? <Loader2 size={11} className="animate-spin" /> : <Eye size={11} />}
         {EVIDENCE_LABELS[f]}
       </button>
     ) : null;

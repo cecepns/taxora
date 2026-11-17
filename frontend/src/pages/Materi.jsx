@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
-import { Award, BookOpen, Download, ExternalLink, Eye, EyeOff, History, Info, Pencil, Plus } from "lucide-react";
+import { Award, BookOpen, Download, ExternalLink, Eye, EyeOff, History, Info, Pencil, Plus, Trash2 } from "lucide-react";
 import DataTable from "@/components/DataTable";
 import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
@@ -49,6 +49,7 @@ export default function Materi() {
   const [file, setFile] = useState(null);
   const [versionsModal, setVersionsModal] = useState(null);
   const [versions, setVersions] = useState([]);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const [settings, setSettings] = useState(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -97,6 +98,17 @@ export default function Materi() {
     setBusy(false);
     if (r) {
       setModal(null);
+      t.reload();
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setBusy(true);
+    const r = await request("delete", API_ENDPOINTS.MATERI.DETAIL(deleteTarget.id), {}, { success: true });
+    setBusy(false);
+    if (r) {
+      setDeleteTarget(null);
       t.reload();
     }
   };
@@ -219,14 +231,24 @@ export default function Materi() {
                   <History size={14} />
                 </button>
                 {canManage && (
-                  <button
-                    type="button"
-                    title="Ubah / unggah versi baru"
-                    className="btn-ghost !rounded-lg !px-2 !py-1.5"
-                    onClick={() => openModal(r)}
-                  >
-                    <Pencil size={14} />
-                  </button>
+                  <>
+                    <button
+                      type="button"
+                      title="Ubah / unggah versi baru"
+                      className="btn-ghost !rounded-lg !px-2 !py-1.5"
+                      onClick={() => openModal(r)}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Hapus materi"
+                      className="btn-ghost !rounded-lg !px-2 !py-1.5 text-rose-600 hover:!bg-rose-50 hover:!text-rose-700 hover:!ring-rose-200"
+                      onClick={() => setDeleteTarget(r)}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </>
                 )}
               </div>
             ),
@@ -402,6 +424,28 @@ export default function Materi() {
           <div className="flex justify-end">
             <button type="button" className="btn" onClick={() => setInfoOpen(false)}>
               Mengerti
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Modal Konfirmasi Hapus Materi */}
+      <Modal
+        open={!!deleteTarget}
+        title="Hapus Materi & Panduan"
+        subtitle={deleteTarget ? `${deleteTarget.title} (${deleteTarget.category} • v${deleteTarget.version})` : ""}
+        onClose={() => setDeleteTarget(null)}
+        maxWidth="max-w-md"
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-rose-200 bg-rose-50/70 p-3.5 text-xs leading-relaxed text-rose-800">
+            Dokumen ini beserta seluruh riwayat versi dan file unggahannya akan <strong>dihapus permanen dari server</strong>.
+          </div>
+          <div className="flex justify-end gap-2">
+            <button type="button" className="btn-ghost" onClick={() => setDeleteTarget(null)}>Batal</button>
+            <button type="button" className="btn-danger" disabled={busy} onClick={confirmDelete}>
+              <Trash2 size={15} />
+              {busy ? "Menghapus..." : "Ya, Hapus"}
             </button>
           </div>
         </div>

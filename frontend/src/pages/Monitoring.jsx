@@ -12,6 +12,7 @@ import {
   FileWarning,
   Info,
   Link2,
+  Loader2,
   MapPin,
   RotateCcw,
   Trash2,
@@ -71,6 +72,8 @@ export default function Monitoring() {
   const [deleteReason, setDeleteReason] = useState("");
   const [detailModal, setDetailModal] = useState(null);
   const [photoPreview, setPhotoPreview] = useState(null);
+  const [photoLoading, setPhotoLoading] = useState(false);
+  const [loadingEv, setLoadingEv] = useState("");
   const [shareLink, setShareLink] = useState(null);
   const [correctForm, setCorrectForm] = useState({ lateMinutes: "", wpCount: "", gpsValid: true, notes: "", reason: "" });
   const [busy, setBusy] = useState(false);
@@ -102,8 +105,10 @@ export default function Monitoring() {
       reason: "",
     });
     if (r.data.photo) {
+      setPhotoLoading(true);
       const blob = await fetchBlobUrl(API_ENDPOINTS.PRESENSI.EVIDENCE(row.id, "photo"));
       if (blob) setPhotoPreview(blob.url);
+      setPhotoLoading(false);
     }
   };
 
@@ -166,15 +171,23 @@ export default function Monitoring() {
     }
   };
 
+  const handleOpenEvidence = async (id, field) => {
+    const key = `${id}-${field}`;
+    setLoadingEv(key);
+    await openEvidence(API_ENDPOINTS.PRESENSI.EVIDENCE(id, field));
+    setLoadingEv("");
+  };
+
   const ev = (r, f, ok) =>
     ok ? (
       <button
         type="button"
         key={f}
-        className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-1 text-xs font-semibold text-brand transition hover:bg-brand hover:text-white"
-        onClick={() => openEvidence(API_ENDPOINTS.PRESENSI.EVIDENCE(r.id, f))}
+        disabled={loadingEv === `${r.id}-${f}`}
+        className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-1 text-xs font-semibold text-brand transition hover:bg-brand hover:text-white disabled:opacity-60"
+        onClick={() => handleOpenEvidence(r.id, f)}
       >
-        <Eye size={12} />
+        {loadingEv === `${r.id}-${f}` ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
         {EVIDENCE_LABELS[f]}
       </button>
     ) : null;
@@ -371,7 +384,12 @@ export default function Monitoring() {
             {/* Pratinjau Foto & Unduhan Bukti */}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="overflow-hidden rounded-2xl border border-slate-200 bg-slate-50">
-                {photoPreview ? (
+                {photoLoading ? (
+                  <div className="flex h-52 flex-col items-center justify-center gap-2 text-xs font-medium text-slate-500">
+                    <Loader2 size={24} className="animate-spin text-brand" />
+                    Memuat foto...
+                  </div>
+                ) : photoPreview ? (
                   <img
                     src={photoPreview}
                     alt="Foto presensi"
