@@ -60,6 +60,11 @@ export const API_ENDPOINTS = {
     OPTIONS: "/prodi/options",
     DETAIL: (id) => `/prodi/${id}`,
   },
+  USERS: {
+    LIST: "/users",
+    DETAIL: (id) => `/users/${id}`,
+    RESET: (id) => `/users/${id}/reset-password`,
+  },
   SUMMARY: "/summary",
   AUDIT: "/audit",
   AUDIT_EXPORT: "/audit/export",

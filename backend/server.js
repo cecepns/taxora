@@ -364,12 +364,14 @@ app.post("/api/auth/login", ah(async (q, s) => {
   const nim = clean(q.body.nim), { password, programId } = q.body;
   const [[u]] = await db.query("SELECT * FROM users WHERE nim=? AND active=1", [nim]);
   if (!u) return fail(s, 401, "NIM atau password salah");
-  if (u.locked) return fail(s, 423, "Akun terkunci, hubungi pengurus");
+  if (u.locked && u.role !== "admin") return fail(s, 423, "Akun terkunci, hubungi pengurus");
   if (!(await bcrypt.compare(String(password || ""), u.password_hash))) {
-    await db.query("UPDATE users SET failed_attempts=failed_attempts+1, locked=(failed_attempts+1>=5) WHERE id=?", [u.id]);
+    if (u.role !== "admin") {
+      await db.query("UPDATE users SET failed_attempts=failed_attempts+1, locked=(failed_attempts+1>=5) WHERE id=?", [u.id]);
+    }
     return fail(s, 401, "NIM atau password salah");
   }
-  await db.query("UPDATE users SET failed_attempts=0 WHERE id=?", [u.id]);
+  await db.query("UPDATE users SET failed_attempts=0, locked=0 WHERE id=?", [u.id]);
   let pid = null;
   let programName = "Semua Program";
   if (u.role !== "admin") {
@@ -596,6 +598,160 @@ app.delete("/api/relawan/:id", auth("pengurus", "admin"), ah(async (q, s) => {
     success: true,
     message: leftMem ? `Relawan ${u.name} dihapus dari program/periode ini` : `Relawan ${u.name} berhasil dihapus`,
   });
+}));
+
+// ---------- manajemen users (admin pusat) ----------
+const VALID_ROLES = ["admin", "pengurus", "koordinator", "relawan"];
+
+app.get("/api/users", auth("admin"), ah(async (q, s) => {
+  const where = [];
+  const params = [];
+  if (q.query.role && VALID_ROLES.includes(q.query.role)) {
+    where.push("u.role=?");
+    params.push(q.query.role);
+  }
+  if (q.query.status === "aktif") { where.push("u.active=1 AND u.locked=0"); }
+  else if (q.query.status === "nonaktif") { where.push("u.active=0"); }
+  else if (q.query.status === "terkunci") { where.push("u.locked=1"); }
+
+  const curYear = new Date().getFullYear();
+  return paged(q, s, {
+    sel: `u.id, u.nim, u.name, u.prodi, u.role, u.active, u.locked, u.must_change, u.created_at,
+      (SELECT GROUP_CONCAT(DISTINCT p.name ORDER BY p.id SEPARATOR ', ')
+       FROM memberships m JOIN programs p ON p.id=m.program_id
+       WHERE m.user_id=u.id AND m.active=1 AND m.year=${curYear}) programs,
+      (SELECT m.program_id FROM memberships m WHERE m.user_id=u.id AND m.active=1 AND m.year=${curYear} ORDER BY m.program_id ASC LIMIT 1) program_id`,
+    from: "FROM users u",
+    where,
+    params,
+    search: ["u.nim", "u.name", "u.prodi", "u.role"],
+    sorts: { nim: "u.nim", name: "u.name", role: "u.role", created: "u.created_at" },
+    defSort: "FIELD(u.role,'admin','pengurus','koordinator','relawan'), u.name ASC",
+  });
+}));
+
+app.post("/api/users", auth("admin"), ah(async (q, s) => {
+  const nim = clean(q.body.nim);
+  const name = clean(q.body.name);
+  const prodi = clean(q.body.prodi) || null;
+  const role = VALID_ROLES.includes(q.body.role) ? q.body.role : null;
+  const rawPw = String(q.body.password || "").trim();
+  const pid = q.body.programId ? +q.body.programId : null;
+  const year = +(q.body.year || new Date().getFullYear());
+
+  if (!nim || !name || !role) return fail(s, 400, "Username/NIM, nama, dan peran wajib diisi");
+  if (role !== "admin" && !pid) return fail(s, 400, "Program wajib dipilih untuk peran selain Admin");
+  if (rawPw && rawPw.length < 10) return fail(s, 400, "Password minimal 10 karakter");
+
+  const [[dup]] = await db.query("SELECT id FROM users WHERE nim=?", [nim]);
+  if (dup) return fail(s, 409, `Username/NIM "${nim}" sudah terdaftar`);
+
+  const finalPw = rawPw || `${nim}@taxora`;
+  const mustChange = rawPw ? 0 : 1;
+  const hash = await bcrypt.hash(finalPw, 10);
+
+  const [r] = await db.query(
+    "INSERT INTO users(nim,name,prodi,role,password_hash,must_change,active) VALUES(?,?,?,?,?,?,1)",
+    [nim, name, prodi, role, hash, mustChange]
+  );
+
+  if (role !== "admin" && pid) {
+    await db.query(
+      "INSERT INTO memberships(user_id,program_id,year,active) VALUES(?,?,?,1) ON DUPLICATE KEY UPDATE active=1",
+      [r.insertId, pid, year]
+    );
+  }
+
+  await audit(q.u, pid, "create", "user", r.insertId, null, { nim, name, role, programId: pid });
+  s.json({
+    success: true,
+    message: rawPw
+      ? `Akun ${role} "${name}" berhasil dibuat`
+      : `Akun ${role} "${name}" dibuat. Password awal: ${nim}@taxora`,
+  });
+}));
+
+app.put("/api/users/:id", auth("admin"), ah(async (q, s) => {
+  const uid = +q.params.id;
+  const [[b]] = await db.query("SELECT id, nim, name, prodi, role, active FROM users WHERE id=?", [uid]);
+  if (!b) return fail(s, 404, "User tidak ditemukan");
+
+  const name = clean(q.body.name) || b.name;
+  const prodi = q.body.prodi !== undefined ? clean(q.body.prodi) || null : b.prodi;
+  const role = VALID_ROLES.includes(q.body.role) ? q.body.role : b.role;
+  const active = q.body.active !== undefined ? (q.body.active ? 1 : 0) : b.active;
+  const pid = q.body.programId ? +q.body.programId : null;
+  const year = +(q.body.year || new Date().getFullYear());
+
+  if (uid === q.u.id && (!active || role !== "admin")) {
+    return fail(s, 400, "Tidak dapat menonaktifkan atau menurunkan peran akun Anda sendiri");
+  }
+  if (b.role === "admin" && (role !== "admin" || !active)) {
+    const [[{ otherAdmins }]] = await db.query("SELECT COUNT(*) otherAdmins FROM users WHERE role='admin' AND active=1 AND id!=?", [uid]);
+    if (!otherAdmins) return fail(s, 400, "Minimal harus ada 1 akun Admin Pusat yang aktif");
+  }
+
+  await db.query("UPDATE users SET name=?, prodi=?, role=?, active=? WHERE id=?", [name, prodi, role, active, uid]);
+  if (role !== "admin" && pid) {
+    await db.query(
+      "INSERT INTO memberships(user_id,program_id,year,active) VALUES(?,?,?,1) ON DUPLICATE KEY UPDATE active=1",
+      [uid, pid, year]
+    );
+  }
+
+  await audit(q.u, pid, "update", "user", uid, b, { name, prodi, role, active }, clean(q.body.reason) || "Ubah data user");
+  s.json({ success: true, message: "Data user berhasil diperbarui" });
+}));
+
+app.post("/api/users/:id/reset-password", auth("admin"), ah(async (q, s) => {
+  const uid = +q.params.id;
+  const [[u]] = await db.query("SELECT id, nim, name, role FROM users WHERE id=?", [uid]);
+  if (!u) return fail(s, 404, "User tidak ditemukan");
+
+  const rawPw = String(q.body.newPassword || "").trim();
+  if (rawPw && rawPw.length < 10) return fail(s, 400, "Password baru minimal 10 karakter");
+
+  const finalPw = rawPw || `${u.nim}@taxora`;
+  const mustChange = rawPw ? 0 : 1;
+  await db.query(
+    "UPDATE users SET password_hash=?, must_change=?, locked=0, failed_attempts=0 WHERE id=?",
+    [await bcrypt.hash(finalPw, 10), mustChange, uid]
+  );
+  await audit(q.u, null, "reset-password", "user", uid, null, { nim: u.nim, role: u.role }, "Reset password & buka kunci user");
+  s.json({
+    success: true,
+    message: rawPw ? `Password ${u.name} diperbarui & kunci dibuka` : `Password ${u.name} diatur ulang ke ${u.nim}@taxora & kunci dibuka`,
+  });
+}));
+
+app.delete("/api/users/:id", auth("admin"), ah(async (q, s) => {
+  const uid = +q.params.id;
+  if (uid === q.u.id) return fail(s, 400, "Tidak dapat menghapus akun Anda sendiri");
+  const [[u]] = await db.query("SELECT id, nim, name, prodi, role FROM users WHERE id=?", [uid]);
+  if (!u) return fail(s, 404, "User tidak ditemukan");
+
+  if (u.role === "admin") {
+    const [[{ otherAdmins }]] = await db.query("SELECT COUNT(*) otherAdmins FROM users WHERE role='admin' AND active=1 AND id!=?", [uid]);
+    if (!otherAdmins) return fail(s, 400, "Tidak dapat menghapus Admin Pusat terakhir");
+  }
+
+  const [atts] = await db.query("SELECT id, photo, ev_excel, ev_bpe, ev_report FROM attendance WHERE user_id=?", [uid]);
+  for (const a of atts) {
+    [a.photo, a.ev_excel, a.ev_bpe, a.ev_report].forEach(safeUnlink);
+    await db.query("DELETE FROM evidence_tokens WHERE attendance_id=?", [a.id]);
+    await db.query("DELETE FROM attendance_revisions WHERE attendance_id=?", [a.id]);
+  }
+  await db.query("DELETE FROM attendance WHERE user_id=?", [uid]);
+  await db.query("DELETE FROM assignments WHERE user_id=?", [uid]);
+  await db.query("UPDATE assignments SET replaced_by=NULL WHERE replaced_by=?", [uid]);
+  await db.query("DELETE FROM substitutions WHERE requester_id=? OR substitute_id=?", [uid, uid]);
+  await db.query("DELETE FROM appreciation_points WHERE user_id=?", [uid]);
+  await db.query("DELETE FROM rotm_winners WHERE user_id=?", [uid]);
+  await db.query("DELETE FROM memberships WHERE user_id=?", [uid]);
+  await db.query("DELETE FROM users WHERE id=?", [uid]);
+
+  await audit(q.u, null, "delete", "user", uid, u, null, clean(q.body?.reason || q.query.reason) || "Hapus akun user");
+  s.json({ success: true, message: `User "${u.name}" berhasil dihapus` });
 }));
 
 // ---------- jadwal & surat tugas ----------
@@ -2004,6 +2160,7 @@ app.use((e, q, s, n) => fail(s, 400, e.message || "Permintaan tidak valid"));
 
 (async () => {
   await ensureSchema();
+  await db.query("UPDATE users SET locked=0, failed_attempts=0 WHERE role='admin' AND locked=1");
   const [[{ c }]] = await db.query("SELECT COUNT(*) c FROM users WHERE role='admin'");
   if (!c) {
     await db.query(

@@ -11,6 +11,7 @@ import { API_ENDPOINTS } from "@/utils/endpoints";
 const ENTITY_OPTIONS = [
   { value: "", label: "Semua Objek" },
   { value: "akun", label: "Akun / Login" },
+  { value: "user", label: "Manajemen User" },
   { value: "presensi", label: "Presensi" },
   { value: "relawan", label: "Relawan" },
   { value: "prodi", label: "Program Studi" },

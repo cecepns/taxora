@@ -15,6 +15,7 @@ import Rotm from "@/pages/Rotm";
 import Laporan from "@/pages/Laporan";
 import Pengaturan from "@/pages/Pengaturan";
 import Prodi from "@/pages/Prodi";
+import Users from "@/pages/Users";
 
 function Guard() {
   const u = getUser();
@@ -37,6 +38,7 @@ export default function App() {
         <Route path="/pergantian" element={<Pergantian />} />
         <Route path="/jadwal" element={<Jadwal />} />
         <Route path="/relawan" element={<Relawan />} />
+        <Route path="/users" element={<Users />} />
         <Route path="/prodi" element={<Prodi />} />
         <Route path="/rotm" element={<Rotm />} />
         <Route path="/laporan" element={<Laporan />} />

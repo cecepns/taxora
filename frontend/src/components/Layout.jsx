@@ -15,6 +15,7 @@ import {
   RefreshCw,
   Settings,
   Trophy,
+  UserCog,
   Users,
   X,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const MENUS = [
   { to: "/pergantian", label: "Pergantian Sesi", icon: RefreshCw, roles: ["relawan", "koordinator", "pengurus", "admin"] },
   { to: "/jadwal", label: "Jadwal & ST", icon: CalendarDays, roles: ["pengurus", "admin"] },
   { to: "/relawan", label: "Relawan", icon: Users, roles: ["pengurus", "admin"] },
+  { to: "/users", label: "Manajemen Users", icon: UserCog, roles: ["admin"] },
   { to: "/prodi", label: "Program Studi", icon: GraduationCap, roles: ["admin"] },
   { to: "/rotm", label: "Relawan Terbaik", icon: Trophy, roles: ["koordinator", "pengurus", "admin"] },
   { to: "/laporan", label: "Laporan", icon: FileText, roles: ["koordinator", "pengurus", "admin"] },
