@@ -24,6 +24,7 @@ import PageHeader from "@/components/PageHeader";
 import StatusBadge from "@/components/StatusBadge";
 import AppSelect from "@/components/AppSelect";
 import AppDatePicker from "@/components/AppDatePicker";
+import EvidencePreviewModal from "@/components/EvidencePreviewModal";
 import usePaginated from "@/hooks/usePaginated";
 import { downloadFile, fetchBlobUrl, openEvidence, request } from "@/utils/request";
 import { API_ENDPOINTS } from "@/utils/endpoints";
@@ -50,7 +51,7 @@ const STATUS_OPTIONS = [
   { value: "ditolak", label: "Ditolak" },
 ];
 
-const EVIDENCE_LABELS = { photo: "Foto", excel: "Excel", bpe: "BPE", report: "Laporan" };
+const EVIDENCE_LABELS = { photo: "Foto", excel: "Excel", bpe: "BPE", report: "Laporan", renjani: "RENJANI" };
 
 export default function Monitoring() {
   const user = getUser();
@@ -74,6 +75,7 @@ export default function Monitoring() {
   const [photoPreview, setPhotoPreview] = useState(null);
   const [photoLoading, setPhotoLoading] = useState(false);
   const [loadingEv, setLoadingEv] = useState("");
+  const [previewDoc, setPreviewDoc] = useState(null);
   const [shareLink, setShareLink] = useState(null);
   const [correctForm, setCorrectForm] = useState({ lateMinutes: "", wpCount: "", gpsValid: true, notes: "", reason: "" });
   const [busy, setBusy] = useState(false);
@@ -171,11 +173,12 @@ export default function Monitoring() {
     }
   };
 
-  const handleOpenEvidence = async (id, field) => {
-    const key = `${id}-${field}`;
-    setLoadingEv(key);
-    await openEvidence(API_ENDPOINTS.PRESENSI.EVIDENCE(id, field));
-    setLoadingEv("");
+  const handleOpenEvidence = (row, field) => {
+    setPreviewDoc({
+      url: API_ENDPOINTS.PRESENSI.EVIDENCE(row.id, field),
+      field: EVIDENCE_LABELS[field] || field,
+      title: `Bukti ${EVIDENCE_LABELS[field] || field} — ${row.name || ""} (${row.nim || ""})`,
+    });
   };
 
   const ev = (r, f, ok) =>
@@ -183,11 +186,10 @@ export default function Monitoring() {
       <button
         type="button"
         key={f}
-        disabled={loadingEv === `${r.id}-${f}`}
-        className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-1 text-xs font-semibold text-brand transition hover:bg-brand hover:text-white disabled:opacity-60"
-        onClick={() => handleOpenEvidence(r.id, f)}
+        className="inline-flex items-center gap-1 rounded-lg bg-brand-50 px-2 py-1 text-xs font-semibold text-brand transition hover:bg-brand hover:text-white"
+        onClick={() => handleOpenEvidence(r, f)}
       >
-        {loadingEv === `${r.id}-${f}` ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+        <Eye size={12} />
         {EVIDENCE_LABELS[f]}
       </button>
     ) : null;
@@ -312,6 +314,7 @@ export default function Monitoring() {
                 {ev(r, "excel", r.has_excel)}
                 {ev(r, "bpe", r.has_bpe)}
                 {ev(r, "report", r.has_report)}
+                {ev(r, "renjani", r.has_renjani)}
               </div>
             ),
           },
@@ -394,7 +397,8 @@ export default function Monitoring() {
                     src={photoPreview}
                     alt="Foto presensi"
                     className="h-52 w-full cursor-zoom-in object-cover"
-                    onClick={() => window.open(photoPreview, "_blank")}
+                    onClick={() => handleOpenEvidence(detailModal, "photo")}
+                    title="Klik untuk memperbesar pratinjau"
                   />
                 ) : (
                   <div className="flex h-52 items-center justify-center text-xs text-slate-400">
@@ -428,18 +432,32 @@ export default function Monitoring() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <div className="font-bold text-slate-700">Unduh Satuan / Buat Tautan 30 Hari:</div>
+                  <div className="font-bold text-slate-700">Lihat Pratinjau / Unduh Dokumen Bukti:</div>
                   {[
                     ["photo", "Foto Presensi", !!detailModal.photo],
                     ["excel", "Excel Pendampingan", !!detailModal.ev_excel],
                     ["bpe", "Bukti BPE SPT", !!detailModal.ev_bpe],
                     ["report", "Bukti Laporan", !!detailModal.ev_report],
+                    ["renjani", "Screenshot Web RENJANI", !!detailModal.renjani_screenshot],
                   ]
                     .filter(([, , ok]) => ok)
                     .map(([f, lbl]) => (
                       <div key={f} className="flex items-center justify-between rounded-lg border border-slate-200 px-2.5 py-1.5">
                         <span className="font-semibold text-slate-700">{lbl}</span>
                         <div className="flex gap-1">
+                          <button
+                            type="button"
+                            className="rounded bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-700 hover:bg-sky-600 hover:text-white"
+                            onClick={() =>
+                              setPreviewDoc({
+                                url: API_ENDPOINTS.PRESENSI.EVIDENCE(detailModal.id, f),
+                                field: lbl,
+                                title: `Bukti ${lbl} — ${detailModal.name} (${detailModal.nim})`,
+                              })
+                            }
+                          >
+                            <Eye size={12} className="inline" /> Lihat
+                          </button>
                           <button
                             type="button"
                             className="rounded bg-brand-50 px-2 py-1 text-[11px] font-semibold text-brand hover:bg-brand hover:text-white"
@@ -510,6 +528,28 @@ export default function Monitoring() {
                   <button type="submit" className="btn" disabled={busy}>{busy ? "Menyimpan..." : "Simpan Koreksi"}</button>
                 </div>
               </form>
+            )}
+
+            {/* Riwayat Aktivitas & WP Dilayani */}
+            {detailModal.activities?.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-500">Rincian Aktivitas Selama Sesi Jaga</div>
+                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-slate-50/70 overflow-hidden">
+                  {detailModal.activities.map((act) => (
+                    <div key={act.id} className="p-3 text-xs space-y-1">
+                      <div className="flex items-center justify-between font-bold text-slate-800">
+                        <span>{act.activity_name}</span>
+                        <span className="rounded-md bg-brand-50 px-2 py-0.5 text-brand">{act.wp_count} WP</span>
+                      </div>
+                      {(act.wp_name || act.wp_npwp) && (
+                        <div className="text-slate-600">WP: {act.wp_name || "-"} {act.wp_npwp ? `(${act.wp_npwp})` : ""}</div>
+                      )}
+                      {act.service_type && <div className="text-slate-500">Layanan: {act.service_type}</div>}
+                      {act.notes && <div className="text-slate-500 italic">Catatan: {act.notes}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
             {/* Riwayat Revisi & Koreksi */}
@@ -598,6 +638,14 @@ export default function Monitoring() {
           </div>
         </form>
       </Modal>
+
+      <EvidencePreviewModal
+        open={!!previewDoc}
+        onClose={() => setPreviewDoc(null)}
+        url={previewDoc?.url}
+        fieldName={previewDoc?.field}
+        title={previewDoc?.title}
+      />
     </div>
   );
 }

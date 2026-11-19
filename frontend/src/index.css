@@ -3,30 +3,61 @@
 @tailwind utilities;
 
 @layer base {
+  html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  @media (min-width: 640px) {
+    html {
+      font-size: 16.5px;
+    }
+  }
+  @media (min-width: 1024px) {
+    html {
+      font-size: 17px;
+    }
+  }
+  @media (min-width: 1440px) {
+    html {
+      font-size: 17.5px;
+    }
+  }
   body {
-    @apply bg-slate-50 font-sans text-slate-800 antialiased selection:bg-brand/15 selection:text-brand;
+    @apply bg-slate-50 font-sans text-slate-800 antialiased selection:bg-brand/15 selection:text-brand text-base;
+    line-height: 1.55;
   }
 }
 
 @layer components {
   .label {
-    @apply mb-1.5 block text-xs font-semibold tracking-wide text-slate-600;
+    @apply mb-1.5 block text-sm font-semibold tracking-wide text-slate-700;
   }
   .input {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 shadow-sm transition placeholder:text-slate-400 hover:border-slate-300 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/10 disabled:cursor-not-allowed disabled:bg-slate-100;
+    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-base text-slate-800 shadow-sm transition placeholder:text-slate-400 hover:border-slate-300 focus:border-brand focus:outline-none focus:ring-4 focus:ring-brand/10 disabled:cursor-not-allowed disabled:bg-slate-100;
   }
   .btn {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-150 hover:bg-brand-dark hover:shadow active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-brand px-4 py-2.5 text-base font-semibold text-white shadow-sm transition-all duration-150 hover:bg-brand-dark hover:shadow active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60;
   }
   .btn-ghost {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 transition-all duration-150 hover:bg-brand-50 hover:text-brand hover:ring-brand/30 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-white px-4 py-2.5 text-base font-semibold text-slate-700 shadow-sm ring-1 ring-slate-200 transition-all duration-150 hover:bg-brand-50 hover:text-brand hover:ring-brand/30 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-danger {
-    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-all duration-150 hover:bg-rose-700 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60;
+    @apply inline-flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2.5 text-base font-semibold text-white shadow-sm transition-all duration-150 hover:bg-rose-700 active:scale-[0.99] disabled:pointer-events-none disabled:opacity-60;
   }
   .card {
     @apply rounded-2xl border border-slate-200/80 bg-white shadow-soft;
   }
+}
+
+/* Scaling overrides for legacy micro-sized text */
+.text-\[10px\] {
+  font-size: 0.775rem !important;
+  line-height: 1.15rem !important;
+}
+.text-\[11px\] {
+  font-size: 0.835rem !important;
+  line-height: 1.25rem !important;
 }
 
 /* Custom React DatePicker Theme */

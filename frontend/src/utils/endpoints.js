@@ -5,6 +5,11 @@ export const API_ENDPOINTS = {
     PROFILE: "/auth/profile",
     CHANGE_PASSWORD: "/auth/change-password",
   },
+  PROFILE: {
+    GET: "/profile",
+    UPDATE: "/profile",
+    PHOTO: (id) => `/profile/photo/${id}`,
+  },
   PROGRAMS: "/programs",
   RELAWAN_HOME: "/relawan-home",
   RELAWAN: {
@@ -16,7 +21,10 @@ export const API_ENDPOINTS = {
     IMPORT_PREVIEW: "/relawan/import/preview",
     IMPORT_COMMIT: "/relawan/import/commit",
   },
-  JADWAL: { LIST: "/jadwal" },
+  JADWAL: {
+    LIST: "/jadwal",
+    IMPORT_EXCEL: "/jadwal/import-excel",
+  },
   PRESENSI: {
     LIST: "/presensi",
     START: "/presensi/start",
@@ -28,17 +36,33 @@ export const API_ENDPOINTS = {
     EVIDENCE: (id, f) => `/evidence/${id}/${f}`,
     SHARE_EVIDENCE: (id, f) => `/evidence/${id}/${f}/share`,
     MONITORING_SUMMARY: "/monitoring/summary",
+    ACTIVITIES: (id) => `/presensi/${id}/activities`,
+    DELETE_ACTIVITY: (actId) => `/presensi/activities/${actId}`,
   },
   PERGANTIAN: {
     LIST: "/pergantian",
     CANDIDATES: "/pergantian/candidates",
     REVIEW: (id) => `/pergantian/${id}/review`,
   },
+  SCHEDULE_SUBMISSIONS: {
+    LIST: "/schedule-submissions",
+    PERIOD: "/schedule-submissions/period",
+    PERIODS: "/schedule-submissions/periods",
+    PERIOD_DETAIL: (id) => `/schedule-submissions/periods/${id}`,
+    REVIEW: (id) => `/schedule-submissions/${id}/review`,
+  },
+  ANNOUNCEMENTS: {
+    LIST: "/announcements",
+    POPUP: "/announcements/popup",
+    DETAIL: (id) => `/announcements/${id}`,
+    COVER: (id) => `/announcements/${id}/cover`,
+  },
   MATERI: {
     LIST: "/materi",
     DETAIL: (id) => `/materi/${id}`,
     VERSIONS: (id) => `/materi/${id}/versions`,
     DOWNLOAD: (id) => `/materi/${id}/download`,
+    COVER: (id) => `/materi/${id}/cover`,
   },
   ROTM: {
     RANKING: "/rotm",

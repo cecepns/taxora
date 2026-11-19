@@ -75,6 +75,13 @@ async function ensureSchema() {
   await addColumnIfMissing("sessions", "surat_tugas_no", "VARCHAR(120) NULL");
   await addColumnIfMissing("attendance", "original_snapshot", "JSON NULL");
   await addColumnIfMissing("attendance", "custom_answers", "JSON NULL");
+  await addColumnIfMissing("attendance", "renjani_screenshot", "VARCHAR(255) NULL");
+  await addColumnIfMissing("materials", "cover_image", "VARCHAR(255) NULL");
+  await addColumnIfMissing("users", "profile_photo", "VARCHAR(255) NULL");
+  await addColumnIfMissing("users", "semester", "VARCHAR(20) NULL");
+  await addColumnIfMissing("users", "email", "VARCHAR(120) NULL");
+  await addColumnIfMissing("users", "phone", "VARCHAR(50) NULL");
+  await addColumnIfMissing("users", "program_id", "INT NULL");
 
   await db.query(`CREATE TABLE IF NOT EXISTS attendance_revisions(
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -218,6 +225,89 @@ async function ensureSchema() {
     active TINYINT NOT NULL DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   )`);
+
+  await db.query(`CREATE TABLE IF NOT EXISTS attendance_activities(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    attendance_id INT NOT NULL,
+    session_id INT NOT NULL,
+    user_id INT NOT NULL,
+    program_id INT NOT NULL,
+    activity_name VARCHAR(255) NOT NULL,
+    wp_count INT NOT NULL DEFAULT 0,
+    wp_name VARCHAR(150) NULL,
+    wp_npwp VARCHAR(50) NULL,
+    service_type VARCHAR(100) NULL,
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX(attendance_id),
+    INDEX(user_id)
+  )`);
+
+  await db.query(`CREATE TABLE IF NOT EXISTS announcements(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    program_id INT NULL,
+    title VARCHAR(200) NOT NULL,
+    content TEXT NOT NULL,
+    category ENUM('umum','rotm','panduan','urgent') NOT NULL DEFAULT 'umum',
+    cover_image VARCHAR(255) NULL,
+    attachment_url VARCHAR(255) NULL,
+    is_popup TINYINT NOT NULL DEFAULT 0,
+    active TINYINT NOT NULL DEFAULT 1,
+    rotm_user_name VARCHAR(120) NULL,
+    rotm_period VARCHAR(50) NULL,
+    created_by INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX(program_id, active)
+  )`);
+
+  await db.query(`CREATE TABLE IF NOT EXISTS schedule_submission_periods(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    program_id INT NOT NULL,
+    year INT NOT NULL,
+    title VARCHAR(150) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    is_open TINYINT NOT NULL DEFAULT 1,
+    notes TEXT NULL,
+    created_by INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX(program_id, year)
+  )`);
+
+  await db.query(`CREATE TABLE IF NOT EXISTS schedule_submissions(
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    period_id INT NULL,
+    program_id INT NOT NULL,
+    user_id INT NOT NULL,
+    year INT NOT NULL,
+    name VARCHAR(120) NOT NULL,
+    nim VARCHAR(50) NOT NULL,
+    prodi VARCHAR(120) NOT NULL,
+    semester VARCHAR(20) NOT NULL,
+    priority_1 VARCHAR(100) NOT NULL,
+    priority_2 VARCHAR(100) NOT NULL,
+    priority_3 VARCHAR(100) NOT NULL,
+    reason TEXT NULL,
+    status ENUM('diajukan','disetujui','ditolak') NOT NULL DEFAULT 'diajukan',
+    admin_notes VARCHAR(255) NULL,
+    reviewed_by INT NULL,
+    reviewed_at DATETIME NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX(program_id, year, status),
+    INDEX(user_id)
+  )`);
+
+  // Default initial announcements jika masih kosong
+  const [[{ annCount }]] = await db.query("SELECT COUNT(*) annCount FROM announcements");
+  if (!annCount) {
+    await db.query(
+      `INSERT INTO announcements(program_id, title, content, category, is_popup, active, created_by)
+       VALUES
+       (NULL, 'Panduan Wajib: Ketentuan Presensi Masuk & Keluar', 'Relawan wajib presensi masuk tepat waktu via kamera langsung. Presensi keluar maksimal 24 jam setelah sesi jaga berakhir dengan menyertakan bukti pendampingan.', 'panduan', 1, 1, 1),
+       (2, 'Khusus Relawan RENJANI: Kewajiban Screenshot Pelaporan Web RENJANI', 'Bagi seluruh relawan penugasan RENJANI, presensi selesai wajib melampirkan screenshot bukti pelaporan aktivitas di web resmi RENJANI. Tanpa screenshot tersebut, presensi selesai tidak dapat diproses.', 'urgent', 0, 1, 1)`
+    );
+  }
 
   const [[{ prodiCount }]] = await db.query("SELECT COUNT(*) prodiCount FROM prodi");
   if (!prodiCount) {
@@ -416,13 +506,16 @@ app.get("/api/relawan-home", auth("relawan"), ah(async (q, s) => {
   const [todaySessions] = await db.query(
     `SELECT s.*, a.replaced_by,
       (SELECT t.id FROM attendance t WHERE t.session_id=s.id AND t.user_id=?) attendance_id,
+      (SELECT t.start_at FROM attendance t WHERE t.session_id=s.id AND t.user_id=?) start_at,
+      (SELECT t.late_minutes FROM attendance t WHERE t.session_id=s.id AND t.user_id=?) late_minutes,
       (SELECT t.status FROM attendance t WHERE t.session_id=s.id AND t.user_id=?) attendance_status,
-      (SELECT t.end_at FROM attendance t WHERE t.session_id=s.id AND t.user_id=?) end_at
+      (SELECT t.end_at FROM attendance t WHERE t.session_id=s.id AND t.user_id=?) end_at,
+      (SELECT (t.photo IS NOT NULL) FROM attendance t WHERE t.session_id=s.id AND t.user_id=?) has_photo
      FROM sessions s
      JOIN assignments a ON a.session_id=s.id AND a.user_id=?
      WHERE s.program_id=? AND s.date=? AND a.replaced_by IS NULL
      ORDER BY s.session_no ASC`,
-    [q.u.id, q.u.id, q.u.id, q.u.id, pid, today]
+    [q.u.id, q.u.id, q.u.id, q.u.id, q.u.id, q.u.id, q.u.id, pid, today]
   );
 
   const [upcomingSessions] = await db.query(
@@ -463,6 +556,22 @@ app.get("/api/relawan-home", auth("relawan"), ah(async (q, s) => {
     [q.u.id, pid]
   );
 
+  const [announcements] = await db.query(
+    `SELECT a.*, u.name author_name
+     FROM announcements a LEFT JOIN users u ON u.id=a.created_by
+     WHERE a.active=1 AND (a.program_id IS NULL OR a.program_id=?)
+     ORDER BY a.created_at DESC LIMIT 6`,
+    [pid]
+  );
+
+  const [[popupAnnouncement]] = await db.query(
+    `SELECT a.*, u.name author_name
+     FROM announcements a LEFT JOIN users u ON u.id=a.created_by
+     WHERE a.active=1 AND a.is_popup=1 AND (a.program_id IS NULL OR a.program_id=?)
+     ORDER BY a.updated_at DESC LIMIT 1`,
+    [pid]
+  );
+
   const cfg = await getProgramSettings(pid);
   s.json({
     success: true,
@@ -472,6 +581,8 @@ app.get("/api/relawan-home", auth("relawan"), ah(async (q, s) => {
       upcomingSessions,
       counts,
       notifications: { revisions, substitutions: subNotices },
+      announcements,
+      popupAnnouncement: popupAnnouncement || null,
       settings: cfg?.settings || null,
     },
   });
@@ -770,11 +881,29 @@ app.get("/api/jadwal", auth(), ah(async (q, s) => {
       "s.id,s.program_id,p.name program_name,s.surat_tugas_no,s.title,s.date,s.session_no,s.start_time,s.end_time," +
       "(SELECT COUNT(*) FROM assignments a WHERE a.session_id=s.id AND a.replaced_by IS NULL) crew" +
       (mine
-        ? `,a.replaced_by,(SELECT t.id FROM attendance t WHERE t.session_id=s.id AND t.user_id=${me}) attendance_id`
+        ? `,a.replaced_by,
+           att.id attendance_id,
+           att.start_at,
+           att.end_at,
+           att.late_minutes,
+           att.gps_valid,
+           att.wp_count,
+           att.notes,
+           att.status attendance_status,
+           att.verify_reason,
+           (att.photo IS NOT NULL) has_photo,
+           (att.ev_excel IS NOT NULL) has_excel,
+           (att.ev_bpe IS NOT NULL) has_bpe,
+           (att.ev_report IS NOT NULL) has_report,
+           (att.renjani_screenshot IS NOT NULL) has_renjani,
+           (SELECT COUNT(*) FROM attendance_activities act WHERE act.attendance_id=att.id) activities_count`
         : ""),
     from:
       "FROM sessions s JOIN programs p ON p.id=s.program_id" +
-      (mine ? ` JOIN assignments a ON a.session_id=s.id AND a.user_id=${me}` : ""),
+      (mine
+        ? ` JOIN assignments a ON a.session_id=s.id AND a.user_id=${me}
+            LEFT JOIN attendance att ON att.session_id=s.id AND att.user_id=${me}`
+        : ""),
     where,
     params,
     search: ["s.title", "s.surat_tugas_no"],
@@ -844,15 +973,34 @@ app.post("/api/presensi/start", auth("relawan"), upload.single("photo"), ah(asyn
 app.post(
   "/api/presensi/:id/finish",
   auth("relawan"),
-  upload.fields([{ name: "excel", maxCount: 1 }, { name: "bpe", maxCount: 1 }, { name: "report", maxCount: 1 }]),
+  upload.fields([
+    { name: "excel", maxCount: 1 },
+    { name: "bpe", maxCount: 1 },
+    { name: "report", maxCount: 1 },
+    { name: "renjani", maxCount: 1 },
+  ]),
   ah(async (q, s) => {
     const [[a]] = await db.query(
-      "SELECT a.*, p.required_evidence req, s.date, s.year FROM attendance a JOIN programs p ON p.id=a.program_id JOIN sessions s ON s.id=a.session_id WHERE a.id=? AND a.user_id=?",
+      "SELECT a.*, p.name program_name, p.required_evidence req, s.date, s.start_time, s.end_time, s.year FROM attendance a JOIN programs p ON p.id=a.program_id JOIN sessions s ON s.id=a.session_id WHERE a.id=? AND a.user_id=?",
       [q.params.id, q.u.id]
     );
     if (!a) return fail(s, 404, "Presensi tidak ditemukan");
     if (a.status === "disetujui") return fail(s, 403, "Data sudah diverifikasi dan tidak bisa diubah");
     if (await isClosed(a.program_id, a.year)) return fail(s, 423, "Periode sudah ditutup");
+
+    // Validasi batas waktu maksimal 24 jam setelah sesi jaga berakhir
+    const sessionDate = a.date instanceof Date ? a.date.toISOString().slice(0, 10) : String(a.date);
+    const sessionEndTime = a.end_time ? String(a.end_time).slice(0, 8) : "17:00:00";
+    const sessionEndMs = new Date(`${sessionDate}T${sessionEndTime}`).getTime();
+    if (!isNaN(sessionEndMs) && Date.now() - sessionEndMs > 24 * 60 * 60 * 1000) {
+      if (!a.end_at) {
+        return fail(
+          s,
+          400,
+          "Batas waktu pengisian presensi selesai (maksimal 24 jam setelah sesi jaga berakhir) telah terlewati. Silakan hubungi pengurus untuk konfirmasi."
+        );
+      }
+    }
 
     const cfg = await getProgramSettings(a.program_id);
     const reqEv = cfg?.settings?.required_evidence ?? (typeof a.req === "string" ? JSON.parse(a.req) : a.req);
@@ -864,6 +1012,16 @@ app.post(
     const missing = (reqEv || []).filter((k) => !f[k] && !a["ev_" + k]);
     if (missing.length) return fail(s, 400, "Bukti wajib belum lengkap: " + missing.join(", "));
 
+    // Ketentuan khusus relawan RENJANI: Wajib melampirkan screenshot bukti pelaporan aktivitas di website RENJANI
+    const isRenjani = a.program_id === 2 || (a.program_name || "").toLowerCase().includes("renjani");
+    if (isRenjani && !f.renjani?.[0] && !a.renjani_screenshot) {
+      return fail(
+        s,
+        400,
+        "Khusus relawan RENJANI, wajib melampirkan screenshot bukti pelaporan aktivitas pada website RENJANI."
+      );
+    }
+
     if (a.end_at) {
       const [[{ cnt }]] = await db.query("SELECT COUNT(*) cnt FROM attendance_revisions WHERE attendance_id=?", [a.id]);
       await db.query(
@@ -873,7 +1031,7 @@ app.post(
           cnt + 1,
           q.u.id,
           "revisi_relawan",
-          JSON.stringify({ wp_count: a.wp_count, notes: a.notes, ev_excel: a.ev_excel, ev_bpe: a.ev_bpe, ev_report: a.ev_report }),
+          JSON.stringify({ wp_count: a.wp_count, notes: a.notes, ev_excel: a.ev_excel, ev_bpe: a.ev_bpe, ev_report: a.ev_report, renjani: a.renjani_screenshot }),
           JSON.stringify({ wp_count: wp, notes: clean(q.body.notes) }),
           "Perbaikan laporan oleh relawan",
         ]
@@ -881,8 +1039,8 @@ app.post(
     }
 
     await db.query(
-      "UPDATE attendance SET end_at=NOW(),wp_count=?,notes=?,status='menunggu',verify_reason=NULL,ev_excel=COALESCE(?,ev_excel),ev_bpe=COALESCE(?,ev_bpe),ev_report=COALESCE(?,ev_report) WHERE id=?",
-      [wp, clean(q.body.notes), f.excel?.[0].path, f.bpe?.[0].path, f.report?.[0].path, a.id]
+      "UPDATE attendance SET end_at=NOW(),wp_count=?,notes=?,status='menunggu',verify_reason=NULL,ev_excel=COALESCE(?,ev_excel),ev_bpe=COALESCE(?,ev_bpe),ev_report=COALESCE(?,ev_report),renjani_screenshot=COALESCE(?,renjani_screenshot) WHERE id=?",
+      [wp, clean(q.body.notes), f.excel?.[0]?.path, f.bpe?.[0]?.path, f.report?.[0]?.path, f.renjani?.[0]?.path, a.id]
     );
     await audit(
       q.u,
@@ -895,7 +1053,7 @@ app.post(
       a.end_at ? "Perbaikan laporan oleh relawan" : "Presensi selesai & kirim laporan"
     );
     await markFinalReportStale(a.program_id, a.date);
-    s.json({ success: true, message: "Laporan terkirim" });
+    s.json({ success: true, message: "Laporan presensi selesai berhasil dikirim" });
   })
 );
 
@@ -945,7 +1103,7 @@ app.get("/api/presensi", auth(), ah(async (q, s) => {
   if (q.query.userId && !mine) { where.push("a.user_id=?"); params.push(+q.query.userId); }
 
   return paged(q, s, {
-    sel: "a.id,a.session_id,a.user_id,a.program_id,p.name program_name,u.nim,u.name,u.prodi,s.date,s.session_no,s.title session_title,a.start_at,a.end_at,a.lat,a.lng,a.late_minutes,a.gps_valid,a.wp_count,a.notes,a.status,a.verify_reason,(a.ev_excel IS NOT NULL) has_excel,(a.ev_bpe IS NOT NULL) has_bpe,(a.ev_report IS NOT NULL) has_report",
+    sel: "a.id,a.session_id,a.user_id,a.program_id,p.name program_name,u.nim,u.name,u.prodi,s.date,s.session_no,s.title session_title,a.start_at,a.end_at,a.lat,a.lng,a.late_minutes,a.gps_valid,a.wp_count,a.notes,a.status,a.verify_reason,(a.photo IS NOT NULL) has_photo,(a.ev_excel IS NOT NULL) has_excel,(a.ev_bpe IS NOT NULL) has_bpe,(a.ev_report IS NOT NULL) has_report,(a.renjani_screenshot IS NOT NULL) has_renjani",
     from: "FROM attendance a JOIN users u ON u.id=a.user_id JOIN sessions s ON s.id=a.session_id JOIN programs p ON p.id=a.program_id",
     where,
     params,
@@ -972,7 +1130,11 @@ app.get("/api/presensi/:id/detail", auth("pengurus", "koordinator", "admin"), ah
      WHERE r.attendance_id=? ORDER BY r.created_at DESC`,
     [row.id]
   );
-  s.json({ success: true, data: { ...row, revisions } });
+  const [activities] = await db.query(
+    "SELECT * FROM attendance_activities WHERE attendance_id=? ORDER BY created_at ASC",
+    [row.id]
+  );
+  s.json({ success: true, data: { ...row, revisions, activities } });
 }));
 
 app.put("/api/presensi/:id/correct", auth("pengurus", "admin"), ah(async (q, s) => {
@@ -1052,13 +1214,13 @@ app.delete("/api/presensi/:id", auth("admin"), ah(async (q, s) => {
   if (await isClosed(a.program_id, a.year)) return fail(s, 423, "Periode sudah ditutup");
 
   // Kumpulkan semua file bukti & foto (termasuk versi lama di riwayat revisi) lalu unlink dari disk
-  const filesToDelete = new Set([a.photo, a.ev_excel, a.ev_bpe, a.ev_report].filter(Boolean));
+  const filesToDelete = new Set([a.photo, a.ev_excel, a.ev_bpe, a.ev_report, a.renjani_screenshot].filter(Boolean));
   const [revs] = await db.query("SELECT before_val FROM attendance_revisions WHERE attendance_id=?", [id]);
   for (const rev of revs) {
     try {
       const bv = typeof rev.before_val === "string" ? JSON.parse(rev.before_val) : rev.before_val;
       if (bv) {
-        [bv.photo, bv.ev_excel, bv.ev_bpe, bv.ev_report].filter(Boolean).forEach((fp) => filesToDelete.add(fp));
+        [bv.photo, bv.ev_excel, bv.ev_bpe, bv.ev_report, bv.renjani].filter(Boolean).forEach((fp) => filesToDelete.add(fp));
       }
     } catch {}
   }
@@ -1083,19 +1245,42 @@ app.delete("/api/presensi/:id", auth("admin"), ah(async (q, s) => {
 }));
 
 app.get("/api/evidence/:id/:field", auth(), ah(async (q, s) => {
-  const col = { photo: "photo", excel: "ev_excel", bpe: "ev_bpe", report: "ev_report" }[q.params.field];
+  const col = { photo: "photo", excel: "ev_excel", bpe: "ev_bpe", report: "ev_report", renjani: "renjani_screenshot" }[q.params.field];
   if (!col) return fail(s, 404, "Bukti tidak ada");
   const [[a]] = await db.query(`SELECT ${col} f,user_id,program_id FROM attendance WHERE id=?`, [q.params.id]);
   if (!a?.f || !fs.existsSync(path.resolve(a.f))) return fail(s, 404, "Bukti tidak ditemukan");
   const own = q.u.role === "relawan" ? a.user_id === q.u.id : q.u.role === "admin" || a.program_id === q.u.programId;
   if (!own) return fail(s, 403, "Tidak memiliki akses");
   if (q.u.role !== "relawan") await audit(q.u, a.program_id, "view-evidence", "presensi", +q.params.id, null, { field: q.params.field });
-  if (q.query.download === "1") return s.download(path.resolve(a.f));
-  s.sendFile(path.resolve(a.f));
+
+  const abs = path.resolve(a.f);
+  const ext = path.extname(abs).toLowerCase();
+  const mimeTypes = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+  const mime = mimeTypes[ext] || "application/octet-stream";
+  const fname = path.basename(abs);
+  s.setHeader("Content-Type", mime);
+  s.setHeader("Access-Control-Allow-Origin", "*");
+  if (q.query.download === "1" || [".xlsx", ".xls", ".csv", ".docx"].includes(ext)) {
+    s.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+    return s.download(abs, fname);
+  }
+  s.setHeader("Content-Disposition", `inline; filename="${fname}"`);
+  s.sendFile(abs);
 }));
 
 app.post("/api/evidence/:id/:field/share", auth("pengurus", "admin"), ah(async (q, s) => {
-  const col = { photo: "photo", excel: "ev_excel", bpe: "ev_bpe", report: "ev_report" }[q.params.field];
+  const col = { photo: "photo", excel: "ev_excel", bpe: "ev_bpe", report: "ev_report", renjani: "renjani_screenshot" }[q.params.field];
   if (!col) return fail(s, 404, "Jenis bukti tidak valid");
   const [[a]] = await db.query(`SELECT ${col} f, program_id FROM attendance WHERE id=?`, [q.params.id]);
   if (!a?.f || (q.u.role !== "admin" && a.program_id !== q.u.programId)) return fail(s, 404, "Bukti tidak ditemukan");
@@ -1115,10 +1300,33 @@ app.get("/api/public/evidence/:token", ah(async (q, s) => {
   const [[t]] = await db.query("SELECT * FROM evidence_tokens WHERE token=?", [q.params.token]);
   if (!t) return fail(s, 404, "Tautan bukti tidak valid");
   if (new Date(t.expires_at) < new Date()) return fail(s, 410, "Tautan bukti sudah kedaluwarsa");
-  const col = { photo: "photo", excel: "ev_excel", bpe: "ev_bpe", report: "ev_report" }[t.field];
+  const col = { photo: "photo", excel: "ev_excel", bpe: "ev_bpe", report: "ev_report", renjani: "renjani_screenshot" }[t.field];
   const [[a]] = await db.query(`SELECT ${col} f FROM attendance WHERE id=?`, [t.attendance_id]);
   if (!a?.f || !fs.existsSync(path.resolve(a.f))) return fail(s, 404, "File bukti tidak ditemukan");
-  s.sendFile(path.resolve(a.f));
+
+  const abs = path.resolve(a.f);
+  const ext = path.extname(abs).toLowerCase();
+  const mimeTypes = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+  };
+  const mime = mimeTypes[ext] || "application/octet-stream";
+  s.setHeader("Content-Type", mime);
+  s.setHeader("Access-Control-Allow-Origin", "*");
+  const fname = path.basename(abs);
+  if (q.query.download === "1" || [".xlsx", ".xls", ".csv"].includes(ext)) {
+    s.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
+    return s.download(abs, fname);
+  }
+  s.setHeader("Content-Disposition", `inline; filename="${fname}"`);
+  s.sendFile(abs);
 }));
 
 // ---------- ringkasan, audit, tutup tahun ----------
@@ -1321,73 +1529,103 @@ app.get("/api/materi/:id/versions", auth(), ah(async (q, s) => {
   s.json({ success: true, data: rows });
 }));
 
-app.post("/api/materi", auth("pengurus", "admin"), upload.single("file"), ah(async (q, s) => {
-  const pid = scope(q) || +q.body.programId;
-  const title = clean(q.body.title);
-  const category = MATERIAL_CATEGORIES.includes(q.body.category) ? q.body.category : "Materi";
-  const year = +q.body.year || new Date().getFullYear();
-  const docDate = clean(q.body.docDate) || null;
-  const description = clean(q.body.description);
-  const externalUrl = clean(q.body.externalUrl) || null;
-  const filePath = q.file ? q.file.path : null;
-  const visible = q.body.visibleToVolunteer === "false" || q.body.visibleToVolunteer === false || q.body.visibleToVolunteer === "0" ? 0 : 1;
-  const active = q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1;
+app.post(
+  "/api/materi",
+  auth("pengurus", "admin"),
+  upload.fields([{ name: "file", maxCount: 1 }, { name: "cover", maxCount: 1 }]),
+  ah(async (q, s) => {
+    const pid = scope(q) || +q.body.programId;
+    const title = clean(q.body.title);
+    const category = MATERIAL_CATEGORIES.includes(q.body.category) ? q.body.category : "Materi";
+    const year = +q.body.year || new Date().getFullYear();
+    const docDate = clean(q.body.docDate) || null;
+    const description = clean(q.body.description);
+    const externalUrl = clean(q.body.externalUrl) || null;
+    const filePath = q.files?.file?.[0]?.path || null;
+    const coverPath = q.files?.cover?.[0]?.path || null;
+    const visible = q.body.visibleToVolunteer === "false" || q.body.visibleToVolunteer === false || q.body.visibleToVolunteer === "0" ? 0 : 1;
+    const active = q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1;
 
-  if (!pid || !title) return fail(s, 400, "Program dan judul materi wajib diisi");
-  if (!filePath && !externalUrl) return fail(s, 400, "Unggah file atau tempel tautan eksternal");
+    if (!pid || !title) return fail(s, 400, "Program dan judul materi wajib diisi");
+    if (!filePath && !externalUrl) return fail(s, 400, "Unggah file dokumen atau tautan eksternal");
 
-  const [r] = await db.query(
-    `INSERT INTO materials(program_id,year,title,category,doc_date,description,file_path,external_url,visible_to_volunteer,active,version,uploaded_by)
-     VALUES(?,?,?,?,?,?,?,?,?,?,1,?)`,
-    [pid, year, title, category, docDate, description, filePath, externalUrl, visible, active, q.u.id]
-  );
-  await db.query(
-    "INSERT INTO material_versions(material_id,version,file_path,external_url,uploaded_by,note) VALUES(?,1,?,?,?,'Versi awal')",
-    [r.insertId, filePath, externalUrl, q.u.id]
-  );
-  await audit(q.u, pid, "create", "materi", r.insertId, null, { title, category, visible });
-  s.json({ success: true, message: "Materi berhasil disimpan" });
-}));
-
-app.put("/api/materi/:id", auth("pengurus", "admin"), upload.single("file"), ah(async (q, s) => {
-  const [[mat]] = await db.query("SELECT * FROM materials WHERE id=?", [q.params.id]);
-  if (!mat || (q.u.role !== "admin" && mat.program_id !== q.u.programId)) return fail(s, 404, "Materi tidak ditemukan");
-
-  const title = clean(q.body.title) || mat.title;
-  const category = MATERIAL_CATEGORIES.includes(q.body.category) ? q.body.category : mat.category;
-  const docDate = q.body.docDate !== undefined ? clean(q.body.docDate) || null : mat.doc_date;
-  const description = q.body.description !== undefined ? clean(q.body.description) : mat.description;
-  const visible =
-    q.body.visibleToVolunteer !== undefined
-      ? q.body.visibleToVolunteer === "false" || q.body.visibleToVolunteer === false || q.body.visibleToVolunteer === "0"
-        ? 0
-        : 1
-      : mat.visible_to_volunteer;
-  const active =
-    q.body.active !== undefined
-      ? q.body.active === "false" || q.body.active === false || q.body.active === "0"
-        ? 0
-        : 1
-      : mat.active;
-
-  const newFile = q.file ? q.file.path : null;
-  const newUrl = q.body.externalUrl !== undefined ? clean(q.body.externalUrl) || null : mat.external_url;
-  const isNewVersion = Boolean(newFile || (newUrl && newUrl !== mat.external_url));
-  const nextVersion = isNewVersion ? mat.version + 1 : mat.version;
-  const finalFile = newFile || mat.file_path;
-
-  await db.query(
-    `UPDATE materials SET title=?, category=?, doc_date=?, description=?, file_path=?, external_url=?, visible_to_volunteer=?, active=?, version=? WHERE id=?`,
-    [title, category, docDate, description, finalFile, newUrl, visible, active, nextVersion, mat.id]
-  );
-  if (isNewVersion) {
-    await db.query(
-      "INSERT INTO material_versions(material_id,version,file_path,external_url,uploaded_by,note) VALUES(?,?,?,?,?,?)",
-      [mat.id, nextVersion, finalFile, newUrl, q.u.id, clean(q.body.versionNote) || `Pembaruan versi ${nextVersion}`]
+    const [r] = await db.query(
+      `INSERT INTO materials(program_id,year,title,category,doc_date,description,file_path,cover_image,external_url,visible_to_volunteer,active,version,uploaded_by)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?,1,?)`,
+      [pid, year, title, category, docDate, description, filePath, coverPath, externalUrl, visible, active, q.u.id]
     );
+    await db.query(
+      "INSERT INTO material_versions(material_id,version,file_path,external_url,uploaded_by,note) VALUES(?,1,?,?,?,'Versi awal')",
+      [r.insertId, filePath, externalUrl, q.u.id]
+    );
+    await audit(q.u, pid, "create", "materi", r.insertId, null, { title, category, visible, hasCover: !!coverPath });
+    s.json({ success: true, message: "Materi berhasil disimpan" });
+  })
+);
+
+app.put(
+  "/api/materi/:id",
+  auth("pengurus", "admin"),
+  upload.fields([{ name: "file", maxCount: 1 }, { name: "cover", maxCount: 1 }]),
+  ah(async (q, s) => {
+    const [[mat]] = await db.query("SELECT * FROM materials WHERE id=?", [q.params.id]);
+    if (!mat || (q.u.role !== "admin" && mat.program_id !== q.u.programId)) return fail(s, 404, "Materi tidak ditemukan");
+
+    const title = clean(q.body.title) || mat.title;
+    const category = MATERIAL_CATEGORIES.includes(q.body.category) ? q.body.category : mat.category;
+    const docDate = q.body.docDate !== undefined ? clean(q.body.docDate) || null : mat.doc_date;
+    const description = q.body.description !== undefined ? clean(q.body.description) : mat.description;
+    const visible =
+      q.body.visibleToVolunteer !== undefined
+        ? q.body.visibleToVolunteer === "false" || q.body.visibleToVolunteer === false || q.body.visibleToVolunteer === "0"
+          ? 0
+          : 1
+        : mat.visible_to_volunteer;
+    const active =
+      q.body.active !== undefined
+        ? q.body.active === "false" || q.body.active === false || q.body.active === "0"
+          ? 0
+          : 1
+        : mat.active;
+
+    const newFile = q.files?.file?.[0]?.path || null;
+    const newCover = q.files?.cover?.[0]?.path || null;
+    const newUrl = q.body.externalUrl !== undefined ? clean(q.body.externalUrl) || null : mat.external_url;
+    const isNewVersion = Boolean(newFile || (newUrl && newUrl !== mat.external_url));
+    const nextVersion = isNewVersion ? mat.version + 1 : mat.version;
+    const finalFile = newFile || mat.file_path;
+    const finalCover = newCover || mat.cover_image;
+
+    if (newCover && mat.cover_image && mat.cover_image !== newCover) {
+      safeUnlink(mat.cover_image);
+    }
+
+    await db.query(
+      `UPDATE materials SET title=?, category=?, doc_date=?, description=?, file_path=?, cover_image=?, external_url=?, visible_to_volunteer=?, active=?, version=? WHERE id=?`,
+      [title, category, docDate, description, finalFile, finalCover, newUrl, visible, active, nextVersion, mat.id]
+    );
+    if (isNewVersion) {
+      await db.query(
+        "INSERT INTO material_versions(material_id,version,file_path,external_url,uploaded_by,note) VALUES(?,?,?,?,?,?)",
+        [mat.id, nextVersion, finalFile, newUrl, q.u.id, clean(q.body.versionNote) || `Pembaruan versi ${nextVersion}`]
+      );
+    }
+    await audit(q.u, mat.program_id, "update", "materi", mat.id, { title: mat.title, version: mat.version }, { title, version: nextVersion, visible, active });
+    s.json({ success: true, message: isNewVersion ? `Versi baru (v${nextVersion}) tersimpan` : "Materi diperbarui" });
+  })
+);
+
+app.get("/api/materi/:id/cover", ah(async (q, s) => {
+  const [[mat]] = await db.query("SELECT cover_image FROM materials WHERE id=?", [q.params.id]);
+  if (!mat?.cover_image || !fs.existsSync(path.resolve(mat.cover_image))) {
+    return fail(s, 404, "Cover materi tidak ditemukan");
   }
-  await audit(q.u, mat.program_id, "update", "materi", mat.id, { title: mat.title, version: mat.version }, { title, version: nextVersion, visible, active });
-  s.json({ success: true, message: isNewVersion ? `Versi baru (v${nextVersion}) tersimpan` : "Materi diperbarui" });
+  const abs = path.resolve(mat.cover_image);
+  const ext = path.extname(abs).toLowerCase();
+  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }[ext] || "image/jpeg";
+  s.setHeader("Content-Type", mime);
+  s.setHeader("Content-Disposition", "inline");
+  s.sendFile(abs);
 }));
 
 app.get("/api/materi/:id/download", auth(), ah(async (q, s) => {
@@ -1404,7 +1642,31 @@ app.get("/api/materi/:id/download", auth(), ah(async (q, s) => {
   }
   if (!targetPath || !fs.existsSync(path.resolve(targetPath))) return fail(s, 404, "File tidak ditemukan");
   await audit(q.u, mat.program_id, "download-materi", "materi", mat.id, null, { title: mat.title, versionId }, "Unduh materi/panduan");
-  s.sendFile(path.resolve(targetPath));
+
+  const absTarget = path.resolve(targetPath);
+  const ext = path.extname(absTarget).toLowerCase();
+  const mimeTypes = {
+    ".pdf": "application/pdf",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  };
+  const mime = mimeTypes[ext] || "application/octet-stream";
+  const safeTitle = mat.title.replace(/[^a-zA-Z0-9_-]/g, "_");
+  const downloadName = `${safeTitle}${ext}`;
+  s.setHeader("Content-Type", mime);
+  s.setHeader("Access-Control-Allow-Origin", "*");
+  if (q.query.preview === "1" && [".pdf", ".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
+    s.setHeader("Content-Disposition", `inline; filename="${downloadName}"`);
+    return s.sendFile(absTarget);
+  }
+  s.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
+  return s.download(absTarget, downloadName);
 }));
 
 app.delete("/api/materi/:id", auth("pengurus", "admin"), ah(async (q, s) => {
@@ -1412,7 +1674,7 @@ app.delete("/api/materi/:id", auth("pengurus", "admin"), ah(async (q, s) => {
   const [[mat]] = await db.query("SELECT * FROM materials WHERE id=?", [id]);
   if (!mat || (q.u.role !== "admin" && mat.program_id !== q.u.programId)) return fail(s, 404, "Materi tidak ditemukan");
 
-  const filesToDelete = new Set([mat.file_path].filter(Boolean));
+  const filesToDelete = new Set([mat.file_path, mat.cover_image].filter(Boolean));
   const [vers] = await db.query("SELECT file_path FROM material_versions WHERE material_id=?", [id]);
   vers.forEach((v) => { if (v.file_path) filesToDelete.add(v.file_path); });
   for (const fp of filesToDelete) safeUnlink(fp);
@@ -2154,6 +2416,443 @@ app.get("/api/audit/export", auth("pengurus", "admin"), ah(async (q, s) => {
     pid ? [pid] : []
   );
   s.json({ success: true, data: rows });
+}));
+
+// ---------- profil user ----------
+app.get("/api/profile", auth(), ah(async (q, s) => {
+  const [[user]] = await db.query(
+    `SELECT u.id, u.nim, u.name, u.email, u.phone, u.prodi, u.semester, u.profile_photo, u.role, u.program_id,
+            p.name program_name
+     FROM users u
+     LEFT JOIN programs p ON p.id=u.program_id
+     WHERE u.id=?`,
+    [q.u.id]
+  );
+  if (!user) return fail(s, 404, "User tidak ditemukan");
+
+  let stats = null;
+  if (user.role === "relawan") {
+    const year = new Date().getFullYear();
+    const [[statRow]] = await db.query(
+      `SELECT
+        COUNT(a.id) total_hadir,
+        COALESCE(SUM(a.wp_count),0) total_wp,
+        COALESCE((SELECT SUM(points) FROM appreciation_points ap WHERE ap.user_id=? AND ap.year=? AND ap.verified=1), 0) total_points
+       FROM attendance a
+       JOIN sessions s ON s.id=a.session_id
+       WHERE a.user_id=? AND s.year=?`,
+      [q.u.id, year, q.u.id, year]
+    );
+    stats = statRow;
+  }
+  s.json({ success: true, data: { ...user, stats } });
+}));
+
+app.put("/api/profile", auth(), upload.single("photo"), ah(async (q, s) => {
+  const [[cur]] = await db.query("SELECT * FROM users WHERE id=?", [q.u.id]);
+  if (!cur) return fail(s, 404, "User tidak ditemukan");
+
+  const name = clean(q.body.name) || cur.name;
+  const phone = clean(q.body.phone) || cur.phone;
+  const email = clean(q.body.email) || cur.email;
+  const prodi = clean(q.body.prodi) || cur.prodi;
+  const semester = clean(q.body.semester) || cur.semester;
+  const photo = q.file ? q.file.path : cur.profile_photo;
+
+  if (q.file && cur.profile_photo && cur.profile_photo !== q.file.path) {
+    safeUnlink(cur.profile_photo);
+  }
+
+  await db.query(
+    "UPDATE users SET name=?, phone=?, email=?, prodi=?, semester=?, profile_photo=? WHERE id=?",
+    [name, phone, email, prodi, semester, photo, q.u.id]
+  );
+  await audit(q.u, cur.program_id, "update", "profile", q.u.id, { name: cur.name }, { name, phone, prodi, semester }, "Pembaruan profil");
+  s.json({ success: true, message: "Profil berhasil diperbarui", data: { name, phone, email, prodi, semester, profile_photo: photo } });
+}));
+
+app.get("/api/profile/photo/:id", ah(async (q, s) => {
+  const [[user]] = await db.query("SELECT profile_photo FROM users WHERE id=?", [q.params.id]);
+  if (!user?.profile_photo || !fs.existsSync(path.resolve(user.profile_photo))) {
+    return fail(s, 404, "Foto profil tidak ditemukan");
+  }
+  const abs = path.resolve(user.profile_photo);
+  const ext = path.extname(abs).toLowerCase();
+  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }[ext] || "image/jpeg";
+  s.setHeader("Content-Type", mime);
+  s.setHeader("Content-Disposition", "inline");
+  s.sendFile(abs);
+}));
+
+// ---------- pencatatan aktivitas presensi ----------
+app.get("/api/presensi/:id/activities", auth(), ah(async (q, s) => {
+  const [[att]] = await db.query("SELECT * FROM attendance WHERE id=?", [q.params.id]);
+  if (!att) return fail(s, 404, "Presensi tidak ditemukan");
+  const own = q.u.role === "relawan" ? att.user_id === q.u.id : q.u.role === "admin" || att.program_id === q.u.programId;
+  if (!own) return fail(s, 403, "Tidak memiliki akses");
+
+  const [activities] = await db.query(
+    "SELECT * FROM attendance_activities WHERE attendance_id=? ORDER BY created_at ASC",
+    [att.id]
+  );
+  s.json({ success: true, data: activities });
+}));
+
+app.post("/api/presensi/:id/activities", auth("relawan"), ah(async (q, s) => {
+  const [[att]] = await db.query("SELECT * FROM attendance WHERE id=? AND user_id=?", [q.params.id, q.u.id]);
+  if (!att) return fail(s, 404, "Presensi tidak ditemukan");
+  if (att.status === "disetujui") return fail(s, 403, "Presensi sudah disetujui dan tidak dapat diubah");
+
+  const actName = clean(q.body.activityName);
+  if (!actName) return fail(s, 400, "Nama kegiatan / aktivitas wajib diisi");
+  const wpCount = Math.max(0, parseInt(q.body.wpCount || 0, 10));
+  const wpName = clean(q.body.wpName) || null;
+  const wpNpwp = clean(q.body.wpNpwp) || null;
+  const serviceType = clean(q.body.serviceType) || null;
+  const notes = clean(q.body.notes) || null;
+
+  const [res] = await db.query(
+    `INSERT INTO attendance_activities(attendance_id, session_id, user_id, program_id, activity_name, wp_count, wp_name, wp_npwp, service_type, notes)
+     VALUES(?,?,?,?,?,?,?,?,?,?)`,
+    [att.id, att.session_id, q.u.id, att.program_id, actName, wpCount, wpName, wpNpwp, serviceType, notes]
+  );
+
+  const [[{ sumWp }]] = await db.query(
+    "SELECT COALESCE(SUM(wp_count), 0) sumWp FROM attendance_activities WHERE attendance_id=?",
+    [att.id]
+  );
+  if (sumWp > 0) {
+    await db.query("UPDATE attendance SET wp_count=? WHERE id=?", [sumWp, att.id]);
+  }
+
+  s.json({ success: true, message: "Aktivitas berhasil ditambahkan", data: { id: res.insertId, wpCount: sumWp } });
+}));
+
+app.delete("/api/presensi/activities/:actId", auth("relawan"), ah(async (q, s) => {
+  const [[act]] = await db.query("SELECT * FROM attendance_activities WHERE id=? AND user_id=?", [q.params.actId, q.u.id]);
+  if (!act) return fail(s, 404, "Aktivitas tidak ditemukan");
+
+  await db.query("DELETE FROM attendance_activities WHERE id=?", [act.id]);
+
+  const [[{ sumWp }]] = await db.query(
+    "SELECT COALESCE(SUM(wp_count), 0) sumWp FROM attendance_activities WHERE attendance_id=?",
+    [act.attendance_id]
+  );
+  await db.query("UPDATE attendance SET wp_count=? WHERE id=?", [sumWp, act.attendance_id]);
+
+  s.json({ success: true, message: "Aktivitas berhasil dihapus", data: { wpCount: sumWp } });
+}));
+
+// ---------- pengumuman, reminder & rotm ----------
+app.get("/api/announcements", auth(), ah(async (q, s) => {
+  const isVol = q.u.role === "relawan";
+  const pid = isVol ? q.u.programId : scope(q);
+  const where = [];
+  const params = [];
+  if (pid) { where.push("(a.program_id IS NULL OR a.program_id=?)"); params.push(pid); }
+  if (isVol) { where.push("a.active=1"); }
+  if (q.query.category) { where.push("a.category=?"); params.push(clean(q.query.category)); }
+
+  return paged(q, s, {
+    sel: "a.*, p.name program_name, u.name author_name",
+    from: "FROM announcements a LEFT JOIN programs p ON p.id=a.program_id LEFT JOIN users u ON u.id=a.created_by",
+    where,
+    params,
+    search: ["a.title", "a.content", "a.rotm_user_name"],
+    sorts: { date: "a.created_at", title: "a.title" },
+    defSort: "a.created_at DESC",
+  });
+}));
+
+app.get("/api/announcements/popup", auth(), ah(async (q, s) => {
+  const pid = q.u.programId || null;
+  const [[pop]] = await db.query(
+    `SELECT a.*, u.name author_name
+     FROM announcements a LEFT JOIN users u ON u.id=a.created_by
+     WHERE a.active=1 AND a.is_popup=1 AND (a.program_id IS NULL OR a.program_id=?)
+     ORDER BY a.updated_at DESC LIMIT 1`,
+    [pid]
+  );
+  s.json({ success: true, data: pop || null });
+}));
+
+app.post("/api/announcements", auth("pengurus", "admin"), upload.single("cover"), ah(async (q, s) => {
+  const pid = scope(q) || (q.body.programId ? +q.body.programId : null);
+  const title = clean(q.body.title);
+  const content = clean(q.body.content);
+  const category = ["umum", "rotm", "panduan", "urgent"].includes(q.body.category) ? q.body.category : "umum";
+  const isPopup = q.body.isPopup === "true" || q.body.isPopup === true || q.body.isPopup === "1" ? 1 : 0;
+  const active = q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1;
+  const rotmName = clean(q.body.rotmUserName) || null;
+  const rotmPeriod = clean(q.body.rotmPeriod) || null;
+  const coverPath = q.file ? q.file.path : null;
+
+  if (!title || !content) return fail(s, 400, "Judul dan isi pengumuman wajib diisi");
+
+  const [res] = await db.query(
+    `INSERT INTO announcements(program_id, title, content, category, cover_image, is_popup, active, rotm_user_name, rotm_period, created_by)
+     VALUES(?,?,?,?,?,?,?,?,?,?)`,
+    [pid, title, content, category, coverPath, isPopup, active, rotmName, rotmPeriod, q.u.id]
+  );
+  await audit(q.u, pid, "create", "announcement", res.insertId, null, { title, category, isPopup });
+  s.json({ success: true, message: "Pengumuman berhasil dipublikasikan" });
+}));
+
+app.put("/api/announcements/:id", auth("pengurus", "admin"), upload.single("cover"), ah(async (q, s) => {
+  const [[ann]] = await db.query("SELECT * FROM announcements WHERE id=?", [q.params.id]);
+  if (!ann || (q.u.role !== "admin" && ann.program_id && ann.program_id !== q.u.programId)) {
+    return fail(s, 404, "Pengumuman tidak ditemukan");
+  }
+
+  const title = clean(q.body.title) || ann.title;
+  const content = clean(q.body.content) || ann.content;
+  const category = ["umum", "rotm", "panduan", "urgent"].includes(q.body.category) ? q.body.category : ann.category;
+  const isPopup = q.body.isPopup !== undefined ? (q.body.isPopup === "true" || q.body.isPopup === true || q.body.isPopup === "1" ? 1 : 0) : ann.is_popup;
+  const active = q.body.active !== undefined ? (q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1) : ann.active;
+  const rotmName = q.body.rotmUserName !== undefined ? clean(q.body.rotmUserName) || null : ann.rotm_user_name;
+  const rotmPeriod = q.body.rotmPeriod !== undefined ? clean(q.body.rotmPeriod) || null : ann.rotm_period;
+  const coverPath = q.file ? q.file.path : ann.cover_image;
+
+  if (q.file && ann.cover_image && ann.cover_image !== q.file.path) {
+    safeUnlink(ann.cover_image);
+  }
+
+  await db.query(
+    `UPDATE announcements SET title=?, content=?, category=?, cover_image=?, is_popup=?, active=?, rotm_user_name=?, rotm_period=? WHERE id=?`,
+    [title, content, category, coverPath, isPopup, active, rotmName, rotmPeriod, ann.id]
+  );
+  await audit(q.u, ann.program_id, "update", "announcement", ann.id, { title: ann.title }, { title, category, isPopup, active });
+  s.json({ success: true, message: "Pengumuman berhasil diperbarui" });
+}));
+
+app.delete("/api/announcements/:id", auth("pengurus", "admin"), ah(async (q, s) => {
+  const [[ann]] = await db.query("SELECT * FROM announcements WHERE id=?", [q.params.id]);
+  if (!ann || (q.u.role !== "admin" && ann.program_id && ann.program_id !== q.u.programId)) {
+    return fail(s, 404, "Pengumuman tidak ditemukan");
+  }
+  if (ann.cover_image) safeUnlink(ann.cover_image);
+  await db.query("DELETE FROM announcements WHERE id=?", [ann.id]);
+  await audit(q.u, ann.program_id, "delete", "announcement", ann.id, { title: ann.title }, null, "Hapus pengumuman");
+  s.json({ success: true, message: "Pengumuman berhasil dihapus" });
+}));
+
+app.get("/api/announcements/:id/cover", ah(async (q, s) => {
+  const [[ann]] = await db.query("SELECT cover_image FROM announcements WHERE id=?", [q.params.id]);
+  if (!ann?.cover_image || !fs.existsSync(path.resolve(ann.cover_image))) {
+    return fail(s, 404, "Cover tidak ditemukan");
+  }
+  const abs = path.resolve(ann.cover_image);
+  const ext = path.extname(abs).toLowerCase();
+  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }[ext] || "image/jpeg";
+  s.setHeader("Content-Type", mime);
+  s.setHeader("Content-Disposition", "inline");
+  s.sendFile(abs);
+}));
+
+// ---------- periode & pengajuan sesi jaga reguler ----------
+app.get("/api/schedule-submissions/period", auth(), ah(async (q, s) => {
+  const pid = q.u.programId || (q.query.programId ? +q.query.programId : 1);
+  const today = new Date().toISOString().slice(0, 10);
+  const [[period]] = await db.query(
+    `SELECT * FROM schedule_submission_periods
+     WHERE program_id=? AND is_open=1 AND start_date <= ? AND end_date >= ?
+     ORDER BY id DESC LIMIT 1`,
+    [pid, today, today]
+  );
+  s.json({ success: true, data: period || null });
+}));
+
+app.get("/api/schedule-submissions/periods", auth("pengurus", "admin"), ah(async (q, s) => {
+  const pid = scope(q);
+  const [periods] = await db.query(
+    `SELECT p.*, prog.name program_name
+     FROM schedule_submission_periods p
+     JOIN programs prog ON prog.id=p.program_id
+     ${pid ? "WHERE p.program_id=?" : ""}
+     ORDER BY p.id DESC`,
+    pid ? [pid] : []
+  );
+  s.json({ success: true, data: periods });
+}));
+
+app.post("/api/schedule-submissions/periods", auth("pengurus", "admin"), ah(async (q, s) => {
+  const pid = scope(q) || +q.body.programId;
+  const title = clean(q.body.title) || "Periode Pengajuan Sesi Jaga";
+  const year = +q.body.year || new Date().getFullYear();
+  const startDate = clean(q.body.startDate);
+  const endDate = clean(q.body.endDate);
+  const isOpen = q.body.isOpen === false || q.body.isOpen === "0" ? 0 : 1;
+  const notes = clean(q.body.notes) || null;
+
+  if (!pid || !startDate || !endDate) return fail(s, 400, "Program, tanggal mulai, dan tanggal selesai wajib diisi");
+
+  const [res] = await db.query(
+    `INSERT INTO schedule_submission_periods(program_id, year, title, start_date, end_date, is_open, notes, created_by)
+     VALUES(?,?,?,?,?,?,?,?)`,
+    [pid, year, title, startDate, endDate, isOpen, notes, q.u.id]
+  );
+  s.json({ success: true, message: "Periode pengajuan berhasil disimpan", data: { id: res.insertId } });
+}));
+
+app.put("/api/schedule-submissions/periods/:id", auth("pengurus", "admin"), ah(async (q, s) => {
+  const [[per]] = await db.query("SELECT * FROM schedule_submission_periods WHERE id=?", [q.params.id]);
+  if (!per || (q.u.role !== "admin" && per.program_id !== q.u.programId)) return fail(s, 404, "Periode tidak ditemukan");
+
+  const title = clean(q.body.title) || per.title;
+  const startDate = clean(q.body.startDate) || per.start_date;
+  const endDate = clean(q.body.endDate) || per.end_date;
+  const isOpen = q.body.isOpen !== undefined ? (q.body.isOpen ? 1 : 0) : per.is_open;
+  const notes = q.body.notes !== undefined ? clean(q.body.notes) || null : per.notes;
+
+  await db.query(
+    "UPDATE schedule_submission_periods SET title=?, start_date=?, end_date=?, is_open=?, notes=? WHERE id=?",
+    [title, startDate, endDate, isOpen, notes, per.id]
+  );
+  s.json({ success: true, message: "Periode pengajuan diperbarui" });
+}));
+
+app.get("/api/schedule-submissions", auth(), ah(async (q, s) => {
+  const isVol = q.u.role === "relawan";
+  const pid = isVol ? q.u.programId : scope(q);
+  const where = [];
+  const params = [];
+  if (pid) { where.push("sub.program_id=?"); params.push(pid); }
+  if (isVol) { where.push("sub.user_id=?"); params.push(q.u.id); }
+  if (q.query.status) { where.push("sub.status=?"); params.push(clean(q.query.status)); }
+  if (q.query.year) { where.push("sub.year=?"); params.push(+q.query.year); }
+
+  return paged(q, s, {
+    sel: "sub.*, prog.name program_name, rev.name reviewer_name",
+    from: "FROM schedule_submissions sub JOIN programs prog ON prog.id=sub.program_id LEFT JOIN users rev ON rev.id=sub.reviewed_by",
+    where,
+    params,
+    search: ["sub.name", "sub.nim", "sub.prodi", "sub.priority_1"],
+    sorts: { date: "sub.created_at", name: "sub.name" },
+    defSort: "sub.created_at DESC",
+  });
+}));
+
+app.post("/api/schedule-submissions", auth("relawan"), ah(async (q, s) => {
+  const pid = q.u.programId;
+  const today = new Date().toISOString().slice(0, 10);
+  const year = new Date().getFullYear();
+
+  const [[period]] = await db.query(
+    `SELECT * FROM schedule_submission_periods
+     WHERE program_id=? AND is_open=1 AND start_date <= ? AND end_date >= ?
+     ORDER BY id DESC LIMIT 1`,
+    [pid, today, today]
+  );
+  if (!period) {
+    return fail(s, 400, "Periode pengajuan sesi jaga reguler saat ini sedang ditutup.");
+  }
+
+  const name = clean(q.body.name) || q.u.name;
+  const nim = clean(q.body.nim) || q.u.nim;
+  const prodi = clean(q.body.prodi) || q.u.prodi || "-";
+  const semester = clean(q.body.semester) || q.u.semester || "-";
+  const p1 = clean(q.body.priority1);
+  const p2 = clean(q.body.priority2);
+  const p3 = clean(q.body.priority3);
+  const reason = clean(q.body.reason) || null;
+
+  if (!p1 || !p2 || !p3) {
+    return fail(s, 400, "3 Prioritas pilihan hari dan jam wajib diisi lengkap");
+  }
+
+  const [res] = await db.query(
+    `INSERT INTO schedule_submissions(period_id, program_id, user_id, year, name, nim, prodi, semester, priority_1, priority_2, priority_3, reason)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [period.id, pid, q.u.id, year, name, nim, prodi, semester, p1, p2, p3, reason]
+  );
+  await audit(q.u, pid, "create", "schedule-submission", res.insertId, null, { p1, p2, p3 });
+  s.json({ success: true, message: "Pengajuan sesi jaga reguler berhasil dikirim" });
+}));
+
+app.put("/api/schedule-submissions/:id/review", auth("pengurus", "admin"), ah(async (q, s) => {
+  const [[sub]] = await db.query("SELECT * FROM schedule_submissions WHERE id=?", [q.params.id]);
+  if (!sub || (q.u.role !== "admin" && sub.program_id !== q.u.programId)) return fail(s, 404, "Pengajuan tidak ditemukan");
+
+  const status = ["disetujui", "ditolak"].includes(q.body.status) ? q.body.status : "disetujui";
+  const adminNotes = clean(q.body.adminNotes) || null;
+
+  await db.query(
+    "UPDATE schedule_submissions SET status=?, admin_notes=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?",
+    [status, adminNotes, q.u.id, sub.id]
+  );
+  await audit(q.u, sub.program_id, "review", "schedule-submission", sub.id, { status: sub.status }, { status, adminNotes });
+  s.json({ success: true, message: `Pengajuan ${status === "disetujui" ? "disetujui" : "ditolak"}` });
+}));
+
+// ---------- import jadwal massal excel ----------
+app.post("/api/jadwal/import-excel", auth("pengurus", "admin"), ah(async (q, s) => {
+  const pid = scope(q) || +q.body.programId;
+  const items = Array.isArray(q.body.items) ? q.body.items : [];
+  if (!pid) return fail(s, 400, "Program wajib dipilih");
+  if (!items.length) return fail(s, 400, "Tidak ada data jadwal untuk diimpor");
+
+  const [users] = await db.query(
+    "SELECT id, nim, name FROM users WHERE program_id=? OR role='relawan'",
+    [pid]
+  );
+  const userMap = new Map();
+  users.forEach((u) => {
+    if (u.nim) userMap.set(String(u.nim).trim().toLowerCase(), u);
+  });
+
+  let createdSessions = 0;
+  let assignedVolunteers = 0;
+  const unmatchedNims = [];
+
+  for (const item of items) {
+    const date = clean(item.date);
+    const sessionNo = parseInt(item.sessionNo || 1, 10);
+    const startTime = clean(item.startTime || "08:00");
+    const endTime = clean(item.endTime || "12:00");
+    const title = clean(item.title) || `Sesi ${sessionNo}`;
+    const stNo = clean(item.suratTugasNo) || null;
+    const year = parseInt(String(date).slice(0, 4), 10) || new Date().getFullYear();
+
+    if (!date) continue;
+
+    let [[sess]] = await db.query(
+      "SELECT id FROM sessions WHERE program_id=? AND date=? AND session_no=?",
+      [pid, date, sessionNo]
+    );
+
+    if (!sess) {
+      const [res] = await db.query(
+        "INSERT INTO sessions(program_id, year, surat_tugas_no, title, date, session_no, start_time, end_time) VALUES(?,?,?,?,?,?,?,?)",
+        [pid, year, stNo, title, date, sessionNo, startTime, endTime]
+      );
+      sess = { id: res.insertId };
+      createdSessions++;
+    } else if (stNo) {
+      await db.query("UPDATE sessions SET surat_tugas_no=COALESCE(?, surat_tugas_no) WHERE id=?", [stNo, sess.id]);
+    }
+
+    const rawNims = Array.isArray(item.nims)
+      ? item.nims
+      : String(item.nims || "").split(/[,;\s]+/).filter(Boolean);
+
+    for (const rNim of rawNims) {
+      const trimmed = String(rNim).trim().toLowerCase();
+      const matched = userMap.get(trimmed);
+      if (matched) {
+        await db.query("INSERT IGNORE INTO assignments(session_id, user_id) VALUES(?,?)", [sess.id, matched.id]);
+        assignedVolunteers++;
+      } else {
+        if (!unmatchedNims.includes(trimmed)) unmatchedNims.push(trimmed);
+      }
+    }
+  }
+
+  await audit(q.u, pid, "import-excel", "jadwal", null, null, { createdSessions, assignedVolunteers, count: items.length });
+  s.json({
+    success: true,
+    message: `Berhasil mengimpor: ${createdSessions} sesi baru dibuat, ${assignedVolunteers} relawan ditugaskan.`,
+    data: { createdSessions, assignedVolunteers, unmatchedNims },
+  });
 }));
 
 app.use((e, q, s, n) => fail(s, 400, e.message || "Permintaan tidak valid"));

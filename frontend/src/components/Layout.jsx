@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
   BookOpen,
@@ -11,10 +11,12 @@ import {
   KeyRound,
   LayoutDashboard,
   LogOut,
+  Megaphone,
   Menu,
   RefreshCw,
   Settings,
   Trophy,
+  User,
   UserCog,
   Users,
   X,
@@ -28,7 +30,7 @@ const MENUS = [
   { to: "/", label: "Beranda", icon: LayoutDashboard, roles: ["relawan", "koordinator", "pengurus", "admin"] },
   { to: "/presensi", label: "Presensi Saya", icon: ClipboardCheck, roles: ["relawan"] },
   { to: "/monitoring", label: "Monitoring", icon: ClipboardCheck, roles: ["koordinator", "pengurus", "admin"] },
-  { to: "/pergantian", label: "Pergantian Sesi", icon: RefreshCw, roles: ["relawan", "koordinator", "pengurus", "admin"] },
+  { to: "/pergantian", label: "Pengajuan & Tukar Sesi", icon: RefreshCw, roles: ["relawan", "koordinator", "pengurus", "admin"] },
   { to: "/jadwal", label: "Jadwal & ST", icon: CalendarDays, roles: ["pengurus", "admin"] },
   { to: "/relawan", label: "Relawan", icon: Users, roles: ["pengurus", "admin"] },
   { to: "/users", label: "Manajemen Users", icon: UserCog, roles: ["admin"] },
@@ -36,6 +38,8 @@ const MENUS = [
   { to: "/rotm", label: "Relawan Terbaik", icon: Trophy, roles: ["koordinator", "pengurus", "admin"] },
   { to: "/laporan", label: "Laporan", icon: FileText, roles: ["koordinator", "pengurus", "admin"] },
   { to: "/materi", label: "Pusat Materi", icon: BookOpen, roles: ["relawan", "koordinator", "pengurus", "admin"] },
+  { to: "/pengumuman", label: "Pengumuman", icon: Megaphone, roles: ["relawan", "koordinator", "pengurus", "admin"] },
+  { to: "/profil", label: "Profil Saya", icon: User, roles: ["relawan", "koordinator", "pengurus", "admin"] },
   { to: "/pengaturan", label: "Pengaturan", icon: Settings, roles: ["pengurus", "admin"] },
   { to: "/audit", label: "Riwayat Perubahan", icon: History, roles: ["pengurus", "admin"] },
 ];
@@ -94,7 +98,7 @@ export default function Layout() {
             </div>
             <div>
               <div className="text-xl font-extrabold tracking-wide text-white">TAXORA</div>
-              <div className="text-xs font-medium text-sky-100/75">
+              <div className="text-sm font-medium text-sky-100/80">
                 {u.programName || "Tax Center PKN STAN"}
               </div>
             </div>
@@ -110,7 +114,7 @@ export default function Layout() {
         </div>
 
         <div className="px-5 pb-2 pt-4">
-          <span className="text-[11px] font-bold uppercase tracking-widest text-sky-200/60">
+          <span className="text-xs font-bold uppercase tracking-widest text-sky-200/70">
             Menu Utama
           </span>
         </div>
@@ -147,15 +151,23 @@ export default function Layout() {
 
         <div className="border-t border-white/10 p-4">
           <div className="flex items-center gap-3 rounded-xl bg-white/10 p-3 backdrop-blur-sm">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent font-bold text-white shadow-sm">
-              {getInitials(u.name)}
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-bold text-white">{u.name}</div>
-              <div className="truncate text-xs capitalize text-sky-200/80">
-                {u.role} {u.programName && u.role !== "admin" ? `• ${u.programName}` : ""}
+            <Link
+              to="/profil"
+              className="flex min-w-0 flex-1 items-center gap-3 group transition"
+              title="Buka Profil Saya"
+            >
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent font-bold text-white shadow-sm group-hover:scale-105 transition-transform">
+                {getInitials(u.name)}
               </div>
-            </div>
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-bold text-white group-hover:text-amber-200 transition-colors">
+                  {u.name}
+                </div>
+                <div className="truncate text-xs capitalize text-sky-200/80">
+                  {u.role} {u.programName && u.role !== "admin" ? `• ${u.programName}` : ""}
+                </div>
+              </div>
+            </Link>
             <button
               type="button"
               onClick={logout}
@@ -188,31 +200,37 @@ export default function Layout() {
           </div>
 
           <div className="flex items-center gap-2.5">
-            <div className="hidden text-right sm:block">
-              <div className="text-sm font-bold text-slate-800">{u.name}</div>
+            <Link to="/profil" className="hidden text-right sm:block group" title="Buka Profil">
+              <div className="text-sm font-bold text-slate-800 group-hover:text-brand transition-colors">
+                {u.name}
+              </div>
               <div className="text-xs font-medium capitalize text-slate-500">
                 {u.role} {u.programName && u.role !== "admin" ? `• ${u.programName}` : ""}
               </div>
-            </div>
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-light text-xs font-bold text-brand ring-1 ring-brand/15">
+            </Link>
+            <Link
+              to="/profil"
+              className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-light text-sm font-bold text-brand ring-1 ring-brand/15 hover:ring-brand/40 transition"
+              title="Buka Profil"
+            >
               {getInitials(u.name)}
-            </div>
+            </Link>
             <button
               type="button"
               title="Ganti Password"
-              className="btn-ghost !px-2.5 !py-2 text-xs"
+              className="btn-ghost !px-3 !py-2 text-sm"
               onClick={() => setPwOpen(true)}
             >
-              <KeyRound size={15} />
+              <KeyRound size={16} />
               <span className="hidden md:inline">Password</span>
             </button>
             <button
               type="button"
-              className="btn-ghost !px-3 !py-2 text-xs"
+              className="btn-ghost !px-3.5 !py-2 text-sm"
               onClick={logout}
               aria-label="Keluar"
             >
-              <LogOut size={15} />
+              <LogOut size={16} />
               <span className="hidden sm:inline">Keluar</span>
             </button>
           </div>

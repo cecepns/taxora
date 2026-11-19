@@ -3,6 +3,28 @@ import { api } from "./api";
 
 export const errMsg = (e) => e.response?.data?.message || "Gagal terhubung ke server";
 
+export function getAuthenticatedUrl(url) {
+  if (!url) return "";
+  const token = localStorage.getItem("taxora_token") || localStorage.getItem("token") || "";
+  const rawBase = api.defaults.baseURL || "/api";
+  const base = rawBase.replace(/\/+$/, "");
+  let cleanUrl = url;
+
+  if (!cleanUrl.startsWith("http://") && !cleanUrl.startsWith("https://")) {
+    if (cleanUrl.startsWith(base)) {
+      // already has base
+    } else if (cleanUrl.startsWith("/api") && base.endsWith("/api")) {
+      cleanUrl = `${base.slice(0, -4)}${cleanUrl}`;
+    } else {
+      cleanUrl = `${base}${cleanUrl.startsWith("/") ? "" : "/"}${cleanUrl}`;
+    }
+  }
+
+  if (!token) return cleanUrl;
+  const separator = cleanUrl.includes("?") ? "&" : "?";
+  return `${cleanUrl}${separator}token=${encodeURIComponent(token)}`;
+}
+
 // request reusable: toast error otomatis, kembalikan data atau null
 export async function request(method, url, data, { success = false, config } = {}) {
   try {
@@ -16,11 +38,12 @@ export async function request(method, url, data, { success = false, config } = {
 }
 
 export async function openEvidence(url) {
-  const res = await api.get(url, { responseType: "blob" }).catch((e) => {
-    toast.error(errMsg(e));
-    return null;
-  });
-  if (res) window.open(URL.createObjectURL(res.data), "_blank");
+  const authUrl = getAuthenticatedUrl(url);
+  const win = window.open(authUrl, "_blank");
+  if (!win) {
+    // Jika diblokir oleh popup blocker Safari, alihkan ke unduhan langsung
+    downloadFile(url);
+  }
 }
 
 export async function fetchBlobUrl(url) {
