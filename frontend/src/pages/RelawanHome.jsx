@@ -23,7 +23,7 @@ import {
   Sparkles,
   Trophy,
 } from "lucide-react";
-import { request } from "@/utils/request";
+import { request, getAuthenticatedUrl } from "@/utils/request";
 import { API_ENDPOINTS } from "@/utils/endpoints";
 import { getUser } from "@/utils/auth";
 import StatusBadge from "@/components/StatusBadge";
@@ -220,7 +220,7 @@ export default function RelawanHome() {
                   {ann.cover_image && (
                     <div className="mb-3 h-28 w-full overflow-hidden rounded-xl bg-slate-100">
                       <img
-                        src={API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id)}
+                        src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id))}
                         alt={ann.title}
                         className="h-full w-full object-cover transition duration-300 hover:scale-105"
                       />
@@ -419,7 +419,7 @@ export default function RelawanHome() {
             {data.popupAnnouncement.cover_image && (
               <div className="h-44 w-full overflow-hidden rounded-2xl bg-slate-100">
                 <img
-                  src={API_ENDPOINTS.ANNOUNCEMENTS.COVER(data.popupAnnouncement.id)}
+                  src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(data.popupAnnouncement.id))}
                   alt={data.popupAnnouncement.title}
                   className="h-full w-full object-cover"
                 />
@@ -448,11 +448,12 @@ export default function RelawanHome() {
         {selectedAnnouncement && (
           <div className="space-y-4">
             {selectedAnnouncement.cover_image && (
-              <div className="max-h-64 w-full overflow-hidden rounded-2xl bg-slate-100">
+              <div className="max-h-64 w-full overflow-hidden rounded-2xl bg-slate-100 flex items-center justify-center">
                 <img
-                  src={API_ENDPOINTS.ANNOUNCEMENTS.COVER(selectedAnnouncement.id)}
+                  src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(selectedAnnouncement.id))}
                   alt={selectedAnnouncement.title}
-                  className="h-full w-full object-contain"
+                  className="max-h-64 w-auto max-w-full object-contain"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
                 />
               </div>
             )}
@@ -465,6 +466,34 @@ export default function RelawanHome() {
             <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
               {selectedAnnouncement.content}
             </div>
+
+            {/* Galeri Foto Pada Pengumuman */}
+            {selectedAnnouncement.gallery_images && (() => {
+              let list = [];
+              try {
+                list = typeof selectedAnnouncement.gallery_images === "string" ? JSON.parse(selectedAnnouncement.gallery_images) : selectedAnnouncement.gallery_images;
+              } catch (e) {}
+              if (!Array.isArray(list) || !list.length) return null;
+              return (
+                <div className="space-y-2 pt-2 border-t border-slate-100">
+                  <div className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Galeri Foto Tambahan ({list.length})
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {list.map((_, idx) => (
+                      <div key={idx} className="h-24 overflow-hidden rounded-xl border border-slate-200 bg-slate-100">
+                        <img
+                          src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.GALLERY(selectedAnnouncement.id, idx))}
+                          alt={`Galeri ${idx + 1}`}
+                          className="h-full w-full object-cover"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
             <div className="flex justify-end pt-2 border-t border-slate-100">
               <button type="button" className="btn" onClick={() => setSelectedAnnouncement(null)}>
                 Tutup

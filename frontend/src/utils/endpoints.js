@@ -38,6 +38,7 @@ export const API_ENDPOINTS = {
     MONITORING_SUMMARY: "/monitoring/summary",
     ACTIVITIES: (id) => `/presensi/${id}/activities`,
     DELETE_ACTIVITY: (actId) => `/presensi/activities/${actId}`,
+    UNLOCK_LATE: (id) => `/presensi/${id}/unlock-late-finish`,
   },
   PERGANTIAN: {
     LIST: "/pergantian",
@@ -56,6 +57,7 @@ export const API_ENDPOINTS = {
     POPUP: "/announcements/popup",
     DETAIL: (id) => `/announcements/${id}`,
     COVER: (id) => `/announcements/${id}/cover`,
+    GALLERY: (id, idx) => `/announcements/${id}/gallery/${idx}`,
   },
   MATERI: {
     LIST: "/materi",

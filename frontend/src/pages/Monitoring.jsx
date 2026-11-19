@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import {
   Check,
+  CheckCircle2,
   ClipboardCheck,
   Clock,
   Copy,
@@ -16,6 +17,7 @@ import {
   MapPin,
   RotateCcw,
   Trash2,
+  Unlock,
   X,
 } from "lucide-react";
 import DataTable from "@/components/DataTable";
@@ -495,6 +497,45 @@ export default function Monitoring() {
                 >
                   <Copy size={12} /> Salin
                 </button>
+              </div>
+            )}
+
+            {/* Izin Khusus Presensi Selesai > 24 Jam */}
+            {canCorrect && !detailModal.end_at && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-200 bg-sky-50/70 p-4 text-xs text-sky-950">
+                <div className="space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-sky-900">
+                    <Unlock size={15} className="text-sky-600" />
+                    Status Presensi Selesai (Batas Waktu 24 Jam)
+                  </div>
+                  <p className="text-sky-700">
+                    {detailModal.allow_late_finish
+                      ? "Izin khusus aktif: Relawan dapat melakukan Presensi Selesai dari portal akun mereka."
+                      : "Jika relawan melewati batas waktu 24 jam setelah sesi berakhir, buka kunci di sini agar mereka dapat mengisi laporan."}
+                  </p>
+                </div>
+                {!detailModal.allow_late_finish ? (
+                  <button
+                    type="button"
+                    className="btn !bg-sky-600 hover:!bg-sky-700 !text-xs !py-1.5 !px-3 shadow-sm inline-flex items-center gap-1.5 shrink-0"
+                    disabled={busy}
+                    onClick={async () => {
+                      setBusy(true);
+                      const r = await request("post", API_ENDPOINTS.PRESENSI.UNLOCK_LATE(detailModal.id), {}, { success: true });
+                      setBusy(false);
+                      if (r) {
+                        setDetailModal({ ...detailModal, allow_late_finish: 1 });
+                        t.reload();
+                      }
+                    }}
+                  >
+                    <Unlock size={14} /> Buka Kunci Batas 24 Jam
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+                    <CheckCircle2 size={13} /> Izin Khusus Aktif
+                  </span>
+                )}
               </div>
             )}
 

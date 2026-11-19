@@ -21,6 +21,7 @@ import {
   RefreshCw,
   Send,
   Trash2,
+  Unlock,
   Upload,
 } from "lucide-react";
 import DataTable from "@/components/DataTable";
@@ -340,21 +341,46 @@ export default function Presensi() {
               }
 
               if (!r.end_at) {
+                const sessionDate = r.date;
+                const sessionEndTime = r.end_time ? String(r.end_time).slice(0, 8) : "17:00:00";
+                const sessionEndMs = new Date(`${sessionDate}T${sessionEndTime}`).getTime();
+                const isOver24h = !isNaN(sessionEndMs) && Date.now() - sessionEndMs > 24 * 60 * 60 * 1000;
+
                 return (
                   <div className="space-y-1.5">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
-                      <Clock size={12} /> Belum Presensi Selesai
-                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-0.5 text-xs font-semibold text-amber-800 ring-1 ring-amber-200">
+                        <Clock size={12} /> Belum Presensi Selesai
+                      </span>
+                      {r.allow_late_finish ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                          <Unlock size={11} /> Izin Khusus 24 Jam Aktif
+                        </span>
+                      ) : isOver24h ? (
+                        <span className="inline-flex items-center gap-1 rounded-full bg-rose-100 px-2 py-0.5 text-[11px] font-bold text-rose-800">
+                          <Lock size={11} /> Terkunci (&gt;24 Jam)
+                        </span>
+                      ) : null}
+                    </div>
                     <div>
                       <button
                         type="button"
-                        className="btn !rounded-xl !px-3 !py-1.5 text-xs !bg-emerald-600 hover:!bg-emerald-700 shadow-sm"
+                        disabled={isOver24h && !r.allow_late_finish}
+                        className={`btn !rounded-xl !px-3 !py-1.5 text-xs shadow-sm ${
+                          isOver24h && !r.allow_late_finish
+                            ? "!bg-slate-200 !text-slate-400 cursor-not-allowed"
+                            : "!bg-emerald-600 hover:!bg-emerald-700"
+                        }`}
                         onClick={() => handleOpenFinishModal(r)}
                       >
                         <Send size={13} /> Presensi Keluar & Laporan
                       </button>
                     </div>
-                    <div className="text-[11px] text-slate-400">Maks. 24 jam setelah sesi selesai</div>
+                    <div className="text-[11px] text-slate-400">
+                      {isOver24h && !r.allow_late_finish
+                        ? "Batas waktu 24 jam lewat. Hubungi admin untuk buka kunci."
+                        : "Maks. 24 jam setelah sesi selesai"}
+                    </div>
                   </div>
                 );
               }

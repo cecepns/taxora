@@ -167,7 +167,42 @@ export default function Jadwal() {
     toast.success("Template Excel Surat Tugas berhasil diunduh");
   };
 
-  // Baca File Excel Yang Diunggah
+  const parseExcelDate = (val) => {
+    if (!val) return "";
+    if (typeof val === "number" || (!isNaN(val) && !String(val).includes("-") && !String(val).includes("/"))) {
+      try {
+        if (XLSX.SSF && XLSX.SSF.parse_date_code) {
+          const dc = XLSX.SSF.parse_date_code(Number(val));
+          if (dc) {
+            return `${dc.y}-${String(dc.m).padStart(2, "0")}-${String(dc.d).padStart(2, "0")}`;
+          }
+        }
+      } catch (e) {}
+      const date = new Date(Math.round((Number(val) - 25569) * 86400 * 1000));
+      if (!isNaN(date.getTime())) {
+        return date.toISOString().slice(0, 10);
+      }
+    }
+    const str = String(val).trim();
+    if (str.includes("/")) {
+      const parts = str.split("/");
+      if (parts.length === 3 && parts[2].length === 4) {
+        return `${parts[2]}-${String(parts[1]).padStart(2, "0")}-${String(parts[0]).padStart(2, "0")}`;
+      }
+    }
+    return str;
+  };
+
+  const parseExcelSession = (val) => {
+    const s = String(val || "").trim().toUpperCase();
+    if (s.includes("III") || s.includes("3")) return 3;
+    if (s.includes("II") || s.includes("2")) return 2;
+    if (s.includes("IV") || s.includes("4")) return 4;
+    if (s.includes("I") || s.includes("1")) return 1;
+    return 1;
+  };
+
+  // Baca File Excel Yang Diunggah (Mendukung Format Template Resmi & Format Piket Tax Clinic)
   const handleFileUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -179,39 +214,109 @@ export default function Jadwal() {
         const wb = XLSX.read(bstr, { type: "binary" });
         const wsname = wb.SheetNames[0];
         const ws = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
 
-        if (!data.length) {
+        // Membaca matriks 2D untuk mendeteksi baris judul/banner otomatis
+        const rawGrid = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+        if (!rawGrid.length) {
           toast.error("File Excel kosong");
           return;
         }
 
-        const formatted = data.map((row, idx) => {
-          const stNo = row.nomor_surat_tugas || row.surat_tugas || row.no_st || "";
-          const date = String(row.tanggal || row.date || "").trim();
-          const sess = String(row.sesi || row.session || "1").trim();
-          const start = String(row.jam_mulai || row.start_time || "08:00").trim();
-          const end = String(row.jam_selesai || row.end_time || "12:00").trim();
-          const title = String(row.judul_kegiatan || row.kegiatan || row.title || `Sesi ${sess}`).trim();
-          const nims = String(row.nim_relawan || row.nim || row.relawan || "").trim();
+        // Cari baris header yang memuat kolom kunci (NIM/Relawan, Tanggal, Sesi)
+        let headerIdx = -1;
+        for (let i = 0; i < Math.min(15, rawGrid.length); i++) {
+          const rowStr = (rawGrid[i] || []).map((c) => String(c).toLowerCase()).join(" ");
+          if (
+            (rowStr.includes("nim") || rowStr.includes("relawan")) &&
+            (rowStr.includes("tanggal") || rowStr.includes("date") || rowStr.includes("sesi"))
+          ) {
+            headerIdx = i;
+            break;
+          }
+        }
 
-          return {
-            id: idx + 1,
-            suratTugasNo: stNo,
-            date,
-            sessionNo: parseInt(sess, 10) || 1,
-            startTime: start.length === 5 ? start : start.slice(0, 5),
-            endTime: end.length === 5 ? end : end.slice(0, 5),
-            title,
-            nims,
-            valid: Boolean(date && start && end && nims),
-          };
-        });
+        let formatted = [];
+        if (headerIdx !== -1) {
+          const headers = rawGrid[headerIdx].map((h) => String(h).trim().toLowerCase());
+          const colNim = headers.findIndex((h) => h.includes("nim") || h.includes("relawan"));
+          const colNama = headers.findIndex((h) => h.includes("nama") || h.includes("name"));
+          const colTanggal = headers.findIndex((h) => h.includes("tanggal") || h.includes("date") || h.includes("tgl"));
+          const colSesi = headers.findIndex((h) => h.includes("sesi") || h.includes("session") || h.includes("shift"));
+          const colStart = headers.findIndex((h) => h.includes("mulai") || h.includes("start"));
+          const colEnd = headers.findIndex((h) => h.includes("selesai") || h.includes("end"));
+          const colTitle = headers.findIndex((h) => h.includes("judul") || h.includes("kegiatan") || h.includes("acara"));
+          const colSt = headers.findIndex((h) => h.includes("surat") || h.includes("st"));
+
+          for (let i = headerIdx + 1; i < rawGrid.length; i++) {
+            const row = rawGrid[i];
+            if (!row || !row.length) continue;
+            const nim = colNim !== -1 ? String(row[colNim] || "").trim() : "";
+            const nama = colNama !== -1 ? String(row[colNama] || "").trim() : "";
+            const date = colTanggal !== -1 ? parseExcelDate(row[colTanggal]) : "";
+            const sess = colSesi !== -1 ? parseExcelSession(row[colSesi]) : 1;
+            const stNo = colSt !== -1 ? String(row[colSt] || "").trim() : "";
+
+            let start = colStart !== -1 ? String(row[colStart] || "").trim() : "";
+            let end = colEnd !== -1 ? String(row[colEnd] || "").trim() : "";
+            if (!start) start = sess === 1 ? "08:00" : (sess === 2 ? "12:00" : "16:00");
+            if (!end) end = sess === 1 ? "12:00" : (sess === 2 ? "16:00" : "20:00");
+
+            let title = colTitle !== -1 ? String(row[colTitle] || "").trim() : "";
+            if (!title) title = `Pendampingan Sesi ${sess}`;
+
+            if (!date && !nim) continue;
+
+            formatted.push({
+              id: formatted.length + 1,
+              suratTugasNo: stNo,
+              date,
+              sessionNo: sess,
+              startTime: start.length >= 5 ? start.slice(0, 5) : start,
+              endTime: end.length >= 5 ? end.slice(0, 5) : end,
+              title,
+              nims: nim,
+              namaRelawan: nama,
+              valid: Boolean(date && start && end && nim),
+            });
+          }
+        } else {
+          // Fallback parsing langsung
+          const data = XLSX.utils.sheet_to_json(ws, { defval: "" });
+          formatted = data.map((row, idx) => {
+            const stNo = row.nomor_surat_tugas || row.surat_tugas || row.no_st || "";
+            const date = parseExcelDate(row.tanggal || row.date || "");
+            const sess = parseExcelSession(row.sesi || row.session || "1");
+            const start = String(row.jam_mulai || row.start_time || (sess === 1 ? "08:00" : "12:00")).trim();
+            const end = String(row.jam_selesai || row.end_time || (sess === 1 ? "12:00" : "16:00")).trim();
+            const title = String(row.judul_kegiatan || row.kegiatan || row.title || `Sesi ${sess}`).trim();
+            const nims = String(row.nim_relawan || row.nim || row.relawan || "").trim();
+            const nama = String(row.nama || row.name || "").trim();
+
+            return {
+              id: idx + 1,
+              suratTugasNo: stNo,
+              date,
+              sessionNo: sess,
+              startTime: start.length >= 5 ? start.slice(0, 5) : start,
+              endTime: end.length >= 5 ? end.slice(0, 5) : end,
+              title,
+              nims,
+              namaRelawan: nama,
+              valid: Boolean(date && start && end && nims),
+            };
+          });
+        }
+
+        if (!formatted.length) {
+          toast.error("Tidak ditemukan data jadwal atau baris relawan yang valid dalam file Excel");
+          return;
+        }
 
         setPreviewRows(formatted);
-        toast.success(`Berhasil membaca ${formatted.length} baris jadwal.`);
+        const validCount = formatted.filter((r) => r.valid).length;
+        toast.success(`Berhasil membaca ${formatted.length} baris data (${validCount} baris valid).`);
       } catch (err) {
-        toast.error("Format Excel tidak sesuai. Gunakan template yang disediakan.");
+        toast.error("Format Excel tidak sesuai. Pastikan file memuat kolom Tanggal, Sesi, dan NIM.");
       }
     };
     reader.readAsBinaryString(file);
@@ -423,7 +528,9 @@ export default function Jadwal() {
                         <td className="p-2">Sesi {r.sessionNo}</td>
                         <td className="p-2">{r.startTime}–{r.endTime}</td>
                         <td className="p-2 truncate max-w-[140px]">{r.title}</td>
-                        <td className="p-2 truncate max-w-[140px] font-mono">{r.nims}</td>
+                        <td className="p-2 max-w-[180px] font-mono truncate" title={r.namaRelawan ? `${r.nims} (${r.namaRelawan})` : r.nims}>
+                          {r.nims}{r.namaRelawan ? ` (${r.namaRelawan})` : ""}
+                        </td>
                         <td className="p-2">
                           {r.valid ? (
                             <span className="text-emerald-700 font-bold">OK</span>

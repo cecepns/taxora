@@ -76,6 +76,12 @@ async function ensureSchema() {
   await addColumnIfMissing("attendance", "original_snapshot", "JSON NULL");
   await addColumnIfMissing("attendance", "custom_answers", "JSON NULL");
   await addColumnIfMissing("attendance", "renjani_screenshot", "VARCHAR(255) NULL");
+  await addColumnIfMissing("attendance", "allow_late_finish", "TINYINT NOT NULL DEFAULT 0");
+  await addColumnIfMissing("announcements", "gallery_images", "JSON NULL");
+  await addColumnIfMissing("schedule_submission_periods", "session_config", "JSON NULL");
+  try {
+    await db.query("ALTER TABLE schedule_submission_periods MODIFY COLUMN program_id INT NULL DEFAULT 0");
+  } catch (e) {}
   await addColumnIfMissing("materials", "cover_image", "VARCHAR(255) NULL");
   await addColumnIfMissing("users", "profile_photo", "VARCHAR(255) NULL");
   await addColumnIfMissing("users", "semester", "VARCHAR(20) NULL");
@@ -887,6 +893,7 @@ app.get("/api/jadwal", auth(), ah(async (q, s) => {
            att.end_at,
            att.late_minutes,
            att.gps_valid,
+           att.allow_late_finish,
            att.wp_count,
            att.notes,
            att.status attendance_status,
@@ -992,12 +999,12 @@ app.post(
     const sessionDate = a.date instanceof Date ? a.date.toISOString().slice(0, 10) : String(a.date);
     const sessionEndTime = a.end_time ? String(a.end_time).slice(0, 8) : "17:00:00";
     const sessionEndMs = new Date(`${sessionDate}T${sessionEndTime}`).getTime();
-    if (!isNaN(sessionEndMs) && Date.now() - sessionEndMs > 24 * 60 * 60 * 1000) {
+    if (!a.allow_late_finish && !isNaN(sessionEndMs) && Date.now() - sessionEndMs > 24 * 60 * 60 * 1000) {
       if (!a.end_at) {
         return fail(
           s,
           400,
-          "Batas waktu pengisian presensi selesai (maksimal 24 jam setelah sesi jaga berakhir) telah terlewati. Silakan hubungi pengurus untuk konfirmasi."
+          "Batas waktu pengisian presensi selesai (maksimal 24 jam setelah sesi jaga berakhir) telah terlewati. Silakan hubungi admin/pengurus untuk membuka izin khusus."
         );
       }
     }
@@ -1057,6 +1064,34 @@ app.post(
   })
 );
 
+app.post("/api/presensi/:id/unlock-late-finish", auth("pengurus", "admin"), ah(async (q, s) => {
+  const [[a]] = await db.query(
+    `SELECT a.*, u.name, u.nim, s.date, s.session_no
+     FROM attendance a
+     JOIN users u ON u.id=a.user_id
+     JOIN sessions s ON s.id=a.session_id
+     WHERE a.id=?`,
+    [q.params.id]
+  );
+  if (!a) return fail(s, 404, "Data presensi tidak ditemukan");
+  if (q.u.role !== "admin" && a.program_id !== q.u.programId) {
+    return fail(s, 403, "Tidak memiliki akses ke data presensi program ini");
+  }
+
+  await db.query("UPDATE attendance SET allow_late_finish=1 WHERE id=?", [a.id]);
+  await audit(
+    q.u,
+    a.program_id,
+    "unlock-late-finish",
+    "presensi",
+    a.id,
+    { allow_late_finish: a.allow_late_finish },
+    { allow_late_finish: 1 },
+    `Buka kunci batas 24 jam untuk relawan ${a.name} (${a.nim}) pada tanggal ${a.date} sesi ${a.session_no}`
+  );
+  s.json({ success: true, message: "Kunci batas waktu 24 jam berhasil dibuka untuk presensi ini" });
+}));
+
 app.get("/api/monitoring/summary", auth("pengurus", "koordinator", "admin"), ah(async (q, s) => {
   const pid = scope(q);
   const year = +(q.query.year || new Date().getFullYear());
@@ -1103,7 +1138,7 @@ app.get("/api/presensi", auth(), ah(async (q, s) => {
   if (q.query.userId && !mine) { where.push("a.user_id=?"); params.push(+q.query.userId); }
 
   return paged(q, s, {
-    sel: "a.id,a.session_id,a.user_id,a.program_id,p.name program_name,u.nim,u.name,u.prodi,s.date,s.session_no,s.title session_title,a.start_at,a.end_at,a.lat,a.lng,a.late_minutes,a.gps_valid,a.wp_count,a.notes,a.status,a.verify_reason,(a.photo IS NOT NULL) has_photo,(a.ev_excel IS NOT NULL) has_excel,(a.ev_bpe IS NOT NULL) has_bpe,(a.ev_report IS NOT NULL) has_report,(a.renjani_screenshot IS NOT NULL) has_renjani",
+    sel: "a.id,a.session_id,a.user_id,a.program_id,p.name program_name,u.nim,u.name,u.prodi,s.date,s.session_no,s.title session_title,a.start_at,a.end_at,a.lat,a.lng,a.late_minutes,a.gps_valid,a.allow_late_finish,a.wp_count,a.notes,a.status,a.verify_reason,(a.photo IS NOT NULL) has_photo,(a.ev_excel IS NOT NULL) has_excel,(a.ev_bpe IS NOT NULL) has_bpe,(a.ev_report IS NOT NULL) has_report,(a.renjani_screenshot IS NOT NULL) has_renjani",
     from: "FROM attendance a JOIN users u ON u.id=a.user_id JOIN sessions s ON s.id=a.session_id JOIN programs p ON p.id=a.program_id",
     where,
     params,
@@ -1417,6 +1452,7 @@ app.get("/api/pergantian", auth(), ah(async (q, s) => {
   if (mine) { where.push("(sub.requester_id=? OR sub.substitute_id=?)"); params.push(q.u.id, q.u.id); }
   if (q.query.year) { where.push("sub.year=?"); params.push(+q.query.year); }
   if (q.query.status) { where.push("sub.status=?"); params.push(clean(q.query.status)); }
+  if (q.query.date) { where.push("ses.date=?"); params.push(clean(q.query.date)); }
 
   return paged(q, s, {
     sel: `sub.*, ses.date, ses.session_no, ses.start_time, ses.end_time, ses.title session_title,
@@ -2637,54 +2673,98 @@ app.get("/api/announcements/popup", auth(), ah(async (q, s) => {
   s.json({ success: true, data: pop || null });
 }));
 
-app.post("/api/announcements", auth("pengurus", "admin"), upload.single("cover"), ah(async (q, s) => {
-  const pid = scope(q) || (q.body.programId ? +q.body.programId : null);
-  const title = clean(q.body.title);
-  const content = clean(q.body.content);
-  const category = ["umum", "rotm", "panduan", "urgent"].includes(q.body.category) ? q.body.category : "umum";
-  const isPopup = q.body.isPopup === "true" || q.body.isPopup === true || q.body.isPopup === "1" ? 1 : 0;
-  const active = q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1;
-  const rotmName = clean(q.body.rotmUserName) || null;
-  const rotmPeriod = clean(q.body.rotmPeriod) || null;
-  const coverPath = q.file ? q.file.path : null;
+app.post(
+  "/api/announcements",
+  auth("pengurus", "admin"),
+  upload.fields([
+    { name: "cover", maxCount: 1 },
+    { name: "gallery", maxCount: 10 },
+  ]),
+  ah(async (q, s) => {
+    const pid = q.body.programId && +q.body.programId !== 0 ? +q.body.programId : (scope(q) || null);
+    const title = clean(q.body.title);
+    const content = clean(q.body.content);
+    const category = ["umum", "rotm", "panduan", "urgent"].includes(q.body.category) ? q.body.category : "umum";
+    const isPopup = q.body.isPopup === "true" || q.body.isPopup === true || q.body.isPopup === "1" ? 1 : 0;
+    const active = q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1;
+    const rotmName = clean(q.body.rotmUserName) || null;
+    const rotmPeriod = clean(q.body.rotmPeriod) || null;
+    const coverPath = q.files?.cover?.[0]?.path || null;
+    const galleryPaths = (q.files?.gallery || []).map((f) => f.path);
+    const galleryJson = galleryPaths.length ? JSON.stringify(galleryPaths) : null;
 
-  if (!title || !content) return fail(s, 400, "Judul dan isi pengumuman wajib diisi");
+    if (!title || !content) return fail(s, 400, "Judul dan isi pengumuman wajib diisi");
 
-  const [res] = await db.query(
-    `INSERT INTO announcements(program_id, title, content, category, cover_image, is_popup, active, rotm_user_name, rotm_period, created_by)
-     VALUES(?,?,?,?,?,?,?,?,?,?)`,
-    [pid, title, content, category, coverPath, isPopup, active, rotmName, rotmPeriod, q.u.id]
-  );
-  await audit(q.u, pid, "create", "announcement", res.insertId, null, { title, category, isPopup });
-  s.json({ success: true, message: "Pengumuman berhasil dipublikasikan" });
-}));
+    const [res] = await db.query(
+      `INSERT INTO announcements(program_id, title, content, category, cover_image, gallery_images, is_popup, active, rotm_user_name, rotm_period, created_by)
+       VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+      [pid, title, content, category, coverPath, galleryJson, isPopup, active, rotmName, rotmPeriod, q.u.id]
+    );
+    await audit(q.u, pid, "create", "announcement", res.insertId, null, { title, category, isPopup, galleryCount: galleryPaths.length });
+    s.json({ success: true, message: "Pengumuman berhasil dipublikasikan" });
+  })
+);
 
-app.put("/api/announcements/:id", auth("pengurus", "admin"), upload.single("cover"), ah(async (q, s) => {
-  const [[ann]] = await db.query("SELECT * FROM announcements WHERE id=?", [q.params.id]);
-  if (!ann || (q.u.role !== "admin" && ann.program_id && ann.program_id !== q.u.programId)) {
-    return fail(s, 404, "Pengumuman tidak ditemukan");
-  }
+app.put(
+  "/api/announcements/:id",
+  auth("pengurus", "admin"),
+  upload.fields([
+    { name: "cover", maxCount: 1 },
+    { name: "gallery", maxCount: 10 },
+  ]),
+  ah(async (q, s) => {
+    const [[ann]] = await db.query("SELECT * FROM announcements WHERE id=?", [q.params.id]);
+    if (!ann || (q.u.role !== "admin" && ann.program_id && ann.program_id !== q.u.programId)) {
+      return fail(s, 404, "Pengumuman tidak ditemukan");
+    }
 
-  const title = clean(q.body.title) || ann.title;
-  const content = clean(q.body.content) || ann.content;
-  const category = ["umum", "rotm", "panduan", "urgent"].includes(q.body.category) ? q.body.category : ann.category;
-  const isPopup = q.body.isPopup !== undefined ? (q.body.isPopup === "true" || q.body.isPopup === true || q.body.isPopup === "1" ? 1 : 0) : ann.is_popup;
-  const active = q.body.active !== undefined ? (q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1) : ann.active;
-  const rotmName = q.body.rotmUserName !== undefined ? clean(q.body.rotmUserName) || null : ann.rotm_user_name;
-  const rotmPeriod = q.body.rotmPeriod !== undefined ? clean(q.body.rotmPeriod) || null : ann.rotm_period;
-  const coverPath = q.file ? q.file.path : ann.cover_image;
+    const title = clean(q.body.title) || ann.title;
+    const content = clean(q.body.content) || ann.content;
+    const category = ["umum", "rotm", "panduan", "urgent"].includes(q.body.category) ? q.body.category : ann.category;
+    const isPopup = q.body.isPopup !== undefined ? (q.body.isPopup === "true" || q.body.isPopup === true || q.body.isPopup === "1" ? 1 : 0) : ann.is_popup;
+    const active = q.body.active !== undefined ? (q.body.active === "false" || q.body.active === false || q.body.active === "0" ? 0 : 1) : ann.active;
+    const rotmName = q.body.rotmUserName !== undefined ? clean(q.body.rotmUserName) || null : ann.rotm_user_name;
+    const rotmPeriod = q.body.rotmPeriod !== undefined ? clean(q.body.rotmPeriod) || null : ann.rotm_period;
+    const coverPath = q.files?.cover?.[0]?.path || ann.cover_image;
 
-  if (q.file && ann.cover_image && ann.cover_image !== q.file.path) {
-    safeUnlink(ann.cover_image);
-  }
+    if (q.files?.cover?.[0] && ann.cover_image && ann.cover_image !== q.files.cover[0].path) {
+      safeUnlink(ann.cover_image);
+    }
 
-  await db.query(
-    `UPDATE announcements SET title=?, content=?, category=?, cover_image=?, is_popup=?, active=?, rotm_user_name=?, rotm_period=? WHERE id=?`,
-    [title, content, category, coverPath, isPopup, active, rotmName, rotmPeriod, ann.id]
-  );
-  await audit(q.u, ann.program_id, "update", "announcement", ann.id, { title: ann.title }, { title, category, isPopup, active });
-  s.json({ success: true, message: "Pengumuman berhasil diperbarui" });
-}));
+    let galleryImages = [];
+    if (ann.gallery_images) {
+      try {
+        galleryImages = typeof ann.gallery_images === "string" ? JSON.parse(ann.gallery_images) : ann.gallery_images;
+        if (!Array.isArray(galleryImages)) galleryImages = [];
+      } catch (e) {
+        galleryImages = [];
+      }
+    }
+    if (q.body.existingGallery) {
+      try {
+        const keep = JSON.parse(q.body.existingGallery);
+        if (Array.isArray(keep)) {
+          galleryImages.forEach((img) => {
+            if (!keep.includes(img)) safeUnlink(img);
+          });
+          galleryImages = keep;
+        }
+      } catch (e) {}
+    }
+    if (q.files?.gallery?.length) {
+      const newPaths = q.files.gallery.map((f) => f.path);
+      galleryImages = [...galleryImages, ...newPaths];
+    }
+    const galleryJson = galleryImages.length ? JSON.stringify(galleryImages) : null;
+
+    await db.query(
+      `UPDATE announcements SET title=?, content=?, category=?, cover_image=?, gallery_images=?, is_popup=?, active=?, rotm_user_name=?, rotm_period=? WHERE id=?`,
+      [title, content, category, coverPath, galleryJson, isPopup, active, rotmName, rotmPeriod, ann.id]
+    );
+    await audit(q.u, ann.program_id, "update", "announcement", ann.id, { title: ann.title }, { title, category, isPopup, active });
+    s.json({ success: true, message: "Pengumuman berhasil diperbarui" });
+  })
+);
 
 app.delete("/api/announcements/:id", auth("pengurus", "admin"), ah(async (q, s) => {
   const [[ann]] = await db.query("SELECT * FROM announcements WHERE id=?", [q.params.id]);
@@ -2692,6 +2772,12 @@ app.delete("/api/announcements/:id", auth("pengurus", "admin"), ah(async (q, s) 
     return fail(s, 404, "Pengumuman tidak ditemukan");
   }
   if (ann.cover_image) safeUnlink(ann.cover_image);
+  if (ann.gallery_images) {
+    try {
+      const g = typeof ann.gallery_images === "string" ? JSON.parse(ann.gallery_images) : ann.gallery_images;
+      if (Array.isArray(g)) g.forEach(safeUnlink);
+    } catch (e) {}
+  }
   await db.query("DELETE FROM announcements WHERE id=?", [ann.id]);
   await audit(q.u, ann.program_id, "delete", "announcement", ann.id, { title: ann.title }, null, "Hapus pengumuman");
   s.json({ success: true, message: "Pengumuman berhasil dihapus" });
@@ -2721,15 +2807,50 @@ app.get("/api/announcements/:id/cover", ah(async (q, s) => {
   });
 }));
 
+app.get("/api/announcements/:id/gallery/:index", ah(async (q, s) => {
+  const [[ann]] = await db.query("SELECT gallery_images FROM announcements WHERE id=?", [q.params.id]);
+  if (!ann?.gallery_images) return fail(s, 404, "Galeri foto tidak ditemukan");
+  let list = [];
+  try {
+    list = typeof ann.gallery_images === "string" ? JSON.parse(ann.gallery_images) : ann.gallery_images;
+  } catch (e) {}
+  const idx = parseInt(q.params.index, 10);
+  const imgPath = list[idx];
+  if (!imgPath || !fs.existsSync(path.resolve(imgPath))) {
+    return fail(s, 404, "Foto galeri tidak ditemukan");
+  }
+  const abs = path.resolve(imgPath);
+  const ext = path.extname(abs).toLowerCase();
+  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif" }[ext] || "image/jpeg";
+  s.setHeader("Content-Type", mime);
+  s.setHeader("Access-Control-Allow-Origin", "*");
+  s.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  s.setHeader("Accept-Ranges", "bytes");
+  s.setHeader("Content-Disposition", "inline");
+  s.sendFile(abs, {
+    headers: {
+      "Content-Type": mime,
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+      "Content-Disposition": "inline",
+    },
+  });
+}));
+
 // ---------- periode & pengajuan sesi jaga reguler ----------
 app.get("/api/schedule-submissions/period", auth(), ah(async (q, s) => {
-  const pid = q.u.programId || (q.query.programId ? +q.query.programId : 1);
+  const pid = q.u.programId || (q.query.programId ? +q.query.programId : null);
   const today = new Date().toISOString().slice(0, 10);
   const [[period]] = await db.query(
-    `SELECT * FROM schedule_submission_periods
-     WHERE program_id=? AND is_open=1 AND start_date <= ? AND end_date >= ?
-     ORDER BY id DESC LIMIT 1`,
-    [pid, today, today]
+    `SELECT p.*, COALESCE(prog.name, 'Semua Program') program_name
+     FROM schedule_submission_periods p
+     LEFT JOIN programs prog ON prog.id=p.program_id
+     WHERE (p.program_id = ? OR p.program_id = 0 OR p.program_id IS NULL)
+       AND p.is_open=1
+       AND p.start_date <= ? AND p.end_date >= ?
+     ORDER BY (p.program_id = ?) DESC, p.id DESC LIMIT 1`,
+    [pid, today, today, pid]
   );
   s.json({ success: true, data: period || null });
 }));
@@ -2737,10 +2858,10 @@ app.get("/api/schedule-submissions/period", auth(), ah(async (q, s) => {
 app.get("/api/schedule-submissions/periods", auth("pengurus", "admin"), ah(async (q, s) => {
   const pid = scope(q);
   const [periods] = await db.query(
-    `SELECT p.*, prog.name program_name
+    `SELECT p.*, COALESCE(prog.name, 'Semua Program') program_name
      FROM schedule_submission_periods p
-     JOIN programs prog ON prog.id=p.program_id
-     ${pid ? "WHERE p.program_id=?" : ""}
+     LEFT JOIN programs prog ON prog.id=p.program_id
+     ${pid ? "WHERE (p.program_id=? OR p.program_id=0 OR p.program_id IS NULL)" : ""}
      ORDER BY p.id DESC`,
     pid ? [pid] : []
   );
@@ -2748,39 +2869,41 @@ app.get("/api/schedule-submissions/periods", auth("pengurus", "admin"), ah(async
 }));
 
 app.post("/api/schedule-submissions/periods", auth("pengurus", "admin"), ah(async (q, s) => {
-  const pid = scope(q) || +q.body.programId;
+  const pid = q.body.programId !== undefined && q.body.programId !== "" ? +q.body.programId : (scope(q) || 0);
   const title = clean(q.body.title) || "Periode Pengajuan Sesi Jaga";
   const year = +q.body.year || new Date().getFullYear();
   const startDate = clean(q.body.startDate);
   const endDate = clean(q.body.endDate);
   const isOpen = q.body.isOpen === false || q.body.isOpen === "0" ? 0 : 1;
   const notes = clean(q.body.notes) || null;
+  const sessionConfig = q.body.sessionConfig ? (typeof q.body.sessionConfig === "string" ? q.body.sessionConfig : JSON.stringify(q.body.sessionConfig)) : null;
 
-  if (!pid || !startDate || !endDate) return fail(s, 400, "Program, tanggal mulai, dan tanggal selesai wajib diisi");
+  if (!startDate || !endDate) return fail(s, 400, "Tanggal mulai dan tanggal selesai wajib diisi");
 
   const [res] = await db.query(
-    `INSERT INTO schedule_submission_periods(program_id, year, title, start_date, end_date, is_open, notes, created_by)
-     VALUES(?,?,?,?,?,?,?,?)`,
-    [pid, year, title, startDate, endDate, isOpen, notes, q.u.id]
+    `INSERT INTO schedule_submission_periods(program_id, year, title, start_date, end_date, is_open, notes, session_config, created_by)
+     VALUES(?,?,?,?,?,?,?,?,?)`,
+    [pid, year, title, startDate, endDate, isOpen, notes, sessionConfig, q.u.id]
   );
   s.json({ success: true, message: "Periode pengajuan berhasil disimpan", data: { id: res.insertId } });
 }));
 
 app.put("/api/schedule-submissions/periods/:id", auth("pengurus", "admin"), ah(async (q, s) => {
   const [[per]] = await db.query("SELECT * FROM schedule_submission_periods WHERE id=?", [q.params.id]);
-  if (!per || (q.u.role !== "admin" && per.program_id !== q.u.programId)) return fail(s, 404, "Periode tidak ditemukan");
+  if (!per || (q.u.role !== "admin" && per.program_id && per.program_id !== q.u.programId)) return fail(s, 404, "Periode tidak ditemukan");
 
   const title = clean(q.body.title) || per.title;
   const startDate = clean(q.body.startDate) || per.start_date;
   const endDate = clean(q.body.endDate) || per.end_date;
-  const isOpen = q.body.isOpen !== undefined ? (q.body.isOpen ? 1 : 0) : per.is_open;
+  const isOpen = q.body.isOpen !== undefined ? (q.body.isOpen === true || q.body.isOpen === 1 || q.body.isOpen === "1" ? 1 : 0) : per.is_open;
   const notes = q.body.notes !== undefined ? clean(q.body.notes) || null : per.notes;
+  const sessionConfig = q.body.sessionConfig !== undefined ? (typeof q.body.sessionConfig === "string" ? q.body.sessionConfig : JSON.stringify(q.body.sessionConfig)) : per.session_config;
 
   await db.query(
-    "UPDATE schedule_submission_periods SET title=?, start_date=?, end_date=?, is_open=?, notes=? WHERE id=?",
-    [title, startDate, endDate, isOpen, notes, per.id]
+    "UPDATE schedule_submission_periods SET title=?, start_date=?, end_date=?, is_open=?, notes=?, session_config=? WHERE id=?",
+    [title, startDate, endDate, isOpen, notes, sessionConfig, per.id]
   );
-  s.json({ success: true, message: "Periode pengajuan diperbarui" });
+  s.json({ success: true, message: isOpen ? "Periode pengajuan diperbarui" : "Periode pengajuan berhasil ditutup" });
 }));
 
 app.get("/api/schedule-submissions", auth(), ah(async (q, s) => {
@@ -2788,32 +2911,34 @@ app.get("/api/schedule-submissions", auth(), ah(async (q, s) => {
   const pid = isVol ? q.u.programId : scope(q);
   const where = [];
   const params = [];
-  if (pid) { where.push("sub.program_id=?"); params.push(pid); }
+  if (pid) { where.push("(sub.program_id=? OR sub.program_id=0 OR sub.program_id IS NULL)"); params.push(pid); }
   if (isVol) { where.push("sub.user_id=?"); params.push(q.u.id); }
   if (q.query.status) { where.push("sub.status=?"); params.push(clean(q.query.status)); }
   if (q.query.year) { where.push("sub.year=?"); params.push(+q.query.year); }
 
   return paged(q, s, {
-    sel: "sub.*, prog.name program_name, rev.name reviewer_name",
-    from: "FROM schedule_submissions sub JOIN programs prog ON prog.id=sub.program_id LEFT JOIN users rev ON rev.id=sub.reviewed_by",
+    sel: "sub.*, COALESCE(prog.name, 'Semua Program') program_name, rev.name reviewer_name",
+    from: "FROM schedule_submissions sub LEFT JOIN programs prog ON prog.id=sub.program_id LEFT JOIN users rev ON rev.id=sub.reviewed_by",
     where,
     params,
-    search: ["sub.name", "sub.nim", "sub.prodi", "sub.priority_1"],
+    search: ["sub.name", "sub.nim", "sub.prodi", "sub.priority_1", "sub.priority_2", "sub.priority_3"],
     sorts: { date: "sub.created_at", name: "sub.name" },
     defSort: "sub.created_at DESC",
   });
 }));
 
 app.post("/api/schedule-submissions", auth("relawan"), ah(async (q, s) => {
-  const pid = q.u.programId;
+  const pid = q.u.programId || null;
   const today = new Date().toISOString().slice(0, 10);
   const year = new Date().getFullYear();
 
   const [[period]] = await db.query(
     `SELECT * FROM schedule_submission_periods
-     WHERE program_id=? AND is_open=1 AND start_date <= ? AND end_date >= ?
-     ORDER BY id DESC LIMIT 1`,
-    [pid, today, today]
+     WHERE (program_id=? OR program_id=0 OR program_id IS NULL)
+       AND is_open=1
+       AND start_date <= ? AND end_date >= ?
+     ORDER BY (program_id=?) DESC, id DESC LIMIT 1`,
+    [pid, today, today, pid]
   );
   if (!period) {
     return fail(s, 400, "Periode pengajuan sesi jaga reguler saat ini sedang ditutup.");

@@ -13,7 +13,9 @@ import {
   Plus,
   RefreshCw,
   Settings2,
+  Trash2,
   X,
+  XCircle,
 } from "lucide-react";
 import DataTable from "@/components/DataTable";
 import Modal from "@/components/Modal";
@@ -45,6 +47,47 @@ const PROGRAM_OPTIONS = [
   { value: "2", label: "Renjani" },
 ];
 
+const PROGRAM_PERIOD_OPTIONS = [
+  { value: "0", label: "Semua Program (Tax Clinic & Renjani)" },
+  { value: "1", label: "Tax Clinic Saja" },
+  { value: "2", label: "Renjani Saja" },
+];
+
+const DEFAULT_SESSION_CONFIG = {
+  totalSessions: 2,
+  sessions: [
+    { sessionNo: 1, name: "Sesi 1", startTime: "08:00", endTime: "12:00" },
+    { sessionNo: 2, name: "Sesi 2", startTime: "12:00", endTime: "16:00" },
+  ],
+  days: ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"],
+  priorityCount: 3,
+};
+
+const getDynamicShiftOptions = (p) => {
+  let cfg = DEFAULT_SESSION_CONFIG;
+  if (p?.session_config) {
+    try {
+      cfg = typeof p.session_config === "string" ? JSON.parse(p.session_config) : p.session_config;
+    } catch (e) {}
+  }
+  const days = cfg.days?.length ? cfg.days : ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"];
+  const sessList = cfg.sessions?.length
+    ? cfg.sessions
+    : [
+        { sessionNo: 1, name: "Sesi 1", startTime: "08:00", endTime: "12:00" },
+        { sessionNo: 2, name: "Sesi 2", startTime: "12:00", endTime: "16:00" },
+      ];
+
+  const opts = [];
+  days.forEach((day) => {
+    sessList.forEach((s) => {
+      const val = `${day}, ${s.name} (${s.startTime} - ${s.endTime} WIB)`;
+      opts.push({ value: val, label: val });
+    });
+  });
+  return opts.length ? opts : SHIFT_OPTIONS;
+};
+
 const SHIFT_OPTIONS = [
   { value: "Senin, 08.00 - 12.00 WIB", label: "Senin, 08.00 - 12.00 WIB" },
   { value: "Senin, 12.00 - 16.00 WIB", label: "Senin, 12.00 - 16.00 WIB" },
@@ -67,6 +110,7 @@ export default function Pergantian() {
   const [activeTab, setActiveTab] = useState("reguler"); // 'reguler' | 'tukar'
   const [status, setStatus] = useState("");
   const [pid, setPid] = useState("");
+  const [swapDate, setSwapDate] = useState("");
   const [busy, setBusy] = useState(false);
 
   // Tab 1: Pengajuan Sesi Reguler
@@ -75,11 +119,12 @@ export default function Pergantian() {
   const [periodModal, setPeriodModal] = useState(false);
   const [periodForm, setPeriodForm] = useState({
     title: "Periode Pengajuan Sesi Jaga Reguler",
-    programId: "1",
+    programId: "0",
     startDate: "",
     endDate: "",
     isOpen: true,
     notes: "",
+    sessionConfig: DEFAULT_SESSION_CONFIG,
   });
 
   const [regulerForm, setRegulerForm] = useState({
@@ -107,7 +152,7 @@ export default function Pergantian() {
   const [swapReviewModal, setSwapReviewModal] = useState(null);
   const [swapReviewReason, setSwapReviewReason] = useState("");
 
-  const tSwap = usePaginated(API_ENDPOINTS.PERGANTIAN.LIST, { status, programId: pid });
+  const tSwap = usePaginated(API_ENDPOINTS.PERGANTIAN.LIST, { status, programId: pid, date: swapDate });
 
   // Load active period for regular schedule submissions
   useEffect(() => {
@@ -120,6 +165,50 @@ export default function Pergantian() {
       request("get", API_ENDPOINTS.PERGANTIAN.CANDIDATES).then((r) => setCandidates(r?.data || []));
     }
   }, [swapOpen, isRelawan]);
+
+  const openPeriodModal = () => {
+    if (period) {
+      let cfg = DEFAULT_SESSION_CONFIG;
+      if (period.session_config) {
+        try {
+          cfg = typeof period.session_config === "string" ? JSON.parse(period.session_config) : period.session_config;
+        } catch (e) {}
+      }
+      setPeriodForm({
+        title: period.title || "Periode Pengajuan Sesi Jaga Reguler",
+        programId: period.program_id ? String(period.program_id) : "0",
+        startDate: period.start_date || "",
+        endDate: period.end_date || "",
+        isOpen: period.is_open === 1 || period.is_open === true,
+        notes: period.notes || "",
+        sessionConfig: cfg,
+      });
+    } else {
+      setPeriodForm({
+        title: "Periode Pengajuan Sesi Jaga Reguler",
+        programId: "0",
+        startDate: "",
+        endDate: "",
+        isOpen: true,
+        notes: "",
+        sessionConfig: DEFAULT_SESSION_CONFIG,
+      });
+    }
+    setPeriodModal(true);
+  };
+
+  const handleCloseActivePeriod = async () => {
+    if (!period) return;
+    if (!window.confirm(`Yakin ingin mengakhiri / menutup periode "${period.title}" sekarang? Relawan tidak akan bisa lagi mengirim pengajuan sesi jaga reguler.`)) return;
+    setBusy(true);
+    const r = await request("put", API_ENDPOINTS.SCHEDULE_SUBMISSIONS.PERIOD_DETAIL(period.id), { isOpen: false }, { success: true });
+    setBusy(false);
+    if (r) {
+      toast.success("Periode pengajuan berhasil ditutup");
+      request("get", API_ENDPOINTS.SCHEDULE_SUBMISSIONS.PERIOD).then((res) => setPeriod(res?.data || null));
+      tReguler.reload();
+    }
+  };
 
   // Tab 1 Submissions
   const submitReguler = async (e) => {
@@ -213,7 +302,7 @@ export default function Pergantian() {
               <button
                 type="button"
                 className="btn-ghost !bg-white shadow-sm"
-                onClick={() => setPeriodModal(true)}
+                onClick={openPeriodModal}
               >
                 <Settings2 size={16} />
                 Atur Periode Pengajuan
@@ -272,26 +361,54 @@ export default function Pergantian() {
                     {period.title} Sedang Dibuka!
                   </span>{" "}
                   Periode aktif dari <strong>{period.start_date}</strong> s.d. <strong>{period.end_date}</strong>.
+                  {period.program_name && (
+                    <span className="ml-1 rounded bg-emerald-200/60 px-1.5 py-0.5 font-bold text-emerald-900">
+                      {period.program_name}
+                    </span>
+                  )}
                   {period.notes && <span className="ml-1 text-emerald-700">({period.notes})</span>}
                 </div>
               </div>
-              {isRelawan && (
-                <button
-                  type="button"
-                  className="btn !rounded-xl !px-3.5 !py-1.5 text-xs !bg-emerald-700 hover:!bg-emerald-800"
-                  onClick={() => setRegulerOpen(true)}
-                >
-                  <Plus size={14} /> Isi Formulir 3 Prioritas
-                </button>
-              )}
+              <div className="flex items-center gap-2">
+                {canManage && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={handleCloseActivePeriod}
+                    className="btn-ghost !rounded-xl !px-3 !py-1.5 text-xs !bg-rose-50 !text-rose-700 !border !border-rose-200 hover:!bg-rose-100 font-bold inline-flex items-center gap-1.5 shadow-sm transition"
+                  >
+                    <XCircle size={14} /> Akhiri / Tutup Periode Ini
+                  </button>
+                )}
+                {isRelawan && (
+                  <button
+                    type="button"
+                    className="btn !rounded-xl !px-3.5 !py-1.5 text-xs !bg-emerald-700 hover:!bg-emerald-800"
+                    onClick={() => setRegulerOpen(true)}
+                  >
+                    <Plus size={14} /> Isi Formulir 3 Prioritas
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
-            <div className="flex items-center gap-2.5 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-amber-900 text-xs">
-              <AlertCircle size={18} className="text-amber-600 shrink-0" />
-              <div>
-                <span className="font-bold">Periode Pengajuan Sesi Jaga Reguler Saat Ini Ditutup.</span>{" "}
-                Pengajuan hanya dapat dilakukan pada rentang tanggal yang ditentukan oleh Admin/Pengurus (misal tgl 1–20).
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-amber-900 text-xs">
+              <div className="flex items-center gap-2.5">
+                <AlertCircle size={18} className="text-amber-600 shrink-0" />
+                <div>
+                  <span className="font-bold">Periode Pengajuan Sesi Jaga Reguler Saat Ini Ditutup.</span>{" "}
+                  Pengajuan hanya dapat dilakukan pada rentang tanggal yang ditentukan oleh Admin/Pengurus.
+                </div>
               </div>
+              {canManage && (
+                <button
+                  type="button"
+                  className="btn !bg-amber-700 hover:!bg-amber-800 !py-1.5 !px-3 text-xs"
+                  onClick={openPeriodModal}
+                >
+                  <Settings2 size={14} /> Buka / Atur Periode Pengajuan
+                </button>
+              )}
             </div>
           )}
 
@@ -397,11 +514,28 @@ export default function Pergantian() {
             toolbar={
               <>
                 {isAdmin && (
-                  <div className="w-full md:w-44">
+                  <div className="w-full md:w-36">
                     <AppSelect size="sm" isSearchable={false} options={PROGRAM_OPTIONS} value={pid} onChange={setPid} />
                   </div>
                 )}
                 <div className="w-full md:w-44">
+                  <AppDatePicker
+                    placeholder="Filter Sesuai Tanggal"
+                    value={swapDate}
+                    onChange={setSwapDate}
+                  />
+                </div>
+                {swapDate && (
+                  <button
+                    type="button"
+                    onClick={() => setSwapDate("")}
+                    className="btn-ghost !rounded-xl !px-2.5 !py-1 text-xs text-rose-600 hover:bg-rose-50"
+                    title="Hapus filter tanggal"
+                  >
+                    <X size={13} /> Reset
+                  </button>
+                )}
+                <div className="w-full md:w-40">
                   <AppSelect size="sm" isSearchable={false} options={STATUS_OPTIONS} value={status} onChange={setStatus} />
                 </div>
               </>
@@ -552,7 +686,7 @@ export default function Pergantian() {
               <label className="label">Prioritas 1 (Pilihan Utama) *</label>
               <AppSelect
                 isSearchable={false}
-                options={SHIFT_OPTIONS}
+                options={getDynamicShiftOptions(period)}
                 value={regulerForm.priority1}
                 onChange={(val) => setRegulerForm({ ...regulerForm, priority1: val })}
                 placeholder="Pilih prioritas 1..."
@@ -563,7 +697,7 @@ export default function Pergantian() {
               <label className="label">Prioritas 2 *</label>
               <AppSelect
                 isSearchable={false}
-                options={SHIFT_OPTIONS}
+                options={getDynamicShiftOptions(period)}
                 value={regulerForm.priority2}
                 onChange={(val) => setRegulerForm({ ...regulerForm, priority2: val })}
                 placeholder="Pilih prioritas 2..."
@@ -574,7 +708,7 @@ export default function Pergantian() {
               <label className="label">Prioritas 3 *</label>
               <AppSelect
                 isSearchable={false}
-                options={SHIFT_OPTIONS}
+                options={getDynamicShiftOptions(period)}
                 value={regulerForm.priority3}
                 onChange={(val) => setRegulerForm({ ...regulerForm, priority3: val })}
                 placeholder="Pilih prioritas 3..."
@@ -605,17 +739,17 @@ export default function Pergantian() {
       <Modal
         open={periodModal}
         title="Pengaturan Periode Pengajuan Sesi Reguler"
-        subtitle="Atur tanggal buka dan tutup pengajuan sesi jaga agar relawan dapat memilih jadwal."
+        subtitle="Atur tanggal buka dan tutup pengajuan sesi jaga, serta tentukan jumlah sesi dan jam tugas."
         onClose={() => setPeriodModal(false)}
-        maxWidth="max-w-md"
+        maxWidth="max-w-xl"
       >
         <form onSubmit={submitPeriodConfig} className="space-y-4">
           {isAdmin && (
             <div>
-              <label className="label">Program *</label>
+              <label className="label">Target Program *</label>
               <AppSelect
                 isSearchable={false}
-                options={PROGRAM_OPTIONS.slice(1)}
+                options={PROGRAM_PERIOD_OPTIONS}
                 value={periodForm.programId}
                 onChange={(val) => setPeriodForm({ ...periodForm, programId: val })}
               />
@@ -649,6 +783,115 @@ export default function Pergantian() {
             </div>
           </div>
 
+          {/* Konfigurasi Sesi Jaga & Rentang Jam */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-3.5 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="label !mb-0 font-bold text-slate-800 flex items-center gap-1.5">
+                  <Clock size={15} className="text-brand" /> Atur Jumlah Sesi & Rentang Waktu
+                </label>
+                <p className="text-[11px] text-slate-500">
+                  Tentukan jam mulai dan selesai untuk tiap sesi yang dapat dipilih relawan.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost !bg-white !rounded-lg !px-2.5 !py-1 text-xs text-brand font-bold shadow-sm inline-flex items-center gap-1"
+                onClick={() => {
+                  const currentSessions = periodForm.sessionConfig?.sessions || [];
+                  const nextNo = currentSessions.length + 1;
+                  const newSession = {
+                    sessionNo: nextNo,
+                    name: `Sesi ${nextNo}`,
+                    startTime: nextNo === 2 ? "12:00" : "16:00",
+                    endTime: nextNo === 2 ? "16:00" : "20:00",
+                  };
+                  setPeriodForm({
+                    ...periodForm,
+                    sessionConfig: {
+                      ...periodForm.sessionConfig,
+                      sessions: [...currentSessions, newSession],
+                      totalSessions: nextNo,
+                    },
+                  });
+                }}
+              >
+                <Plus size={13} /> Tambah Sesi
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {(periodForm.sessionConfig?.sessions || []).map((sess, idx) => (
+                <div key={idx} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2.5 text-xs">
+                  <div className="w-28 shrink-0">
+                    <input
+                      className="input !py-1 !text-xs font-bold"
+                      value={sess.name}
+                      placeholder="Nama Sesi"
+                      onChange={(e) => {
+                        const updated = [...(periodForm.sessionConfig?.sessions || [])];
+                        updated[idx].name = e.target.value;
+                        setPeriodForm({
+                          ...periodForm,
+                          sessionConfig: { ...periodForm.sessionConfig, sessions: updated },
+                        });
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5 flex-1">
+                    <input
+                      type="time"
+                      className="input !py-1 !px-2 !text-xs"
+                      value={sess.startTime}
+                      onChange={(e) => {
+                        const updated = [...(periodForm.sessionConfig?.sessions || [])];
+                        updated[idx].startTime = e.target.value;
+                        setPeriodForm({
+                          ...periodForm,
+                          sessionConfig: { ...periodForm.sessionConfig, sessions: updated },
+                        });
+                      }}
+                    />
+                    <span className="text-slate-400 text-xs">s/d</span>
+                    <input
+                      type="time"
+                      className="input !py-1 !px-2 !text-xs"
+                      value={sess.endTime}
+                      onChange={(e) => {
+                        const updated = [...(periodForm.sessionConfig?.sessions || [])];
+                        updated[idx].endTime = e.target.value;
+                        setPeriodForm({
+                          ...periodForm,
+                          sessionConfig: { ...periodForm.sessionConfig, sessions: updated },
+                        });
+                      }}
+                    />
+                  </div>
+                  {periodForm.sessionConfig?.sessions?.length > 1 && (
+                    <button
+                      type="button"
+                      className="text-rose-500 hover:text-rose-700 p-1"
+                      onClick={() => {
+                        const updated = periodForm.sessionConfig.sessions.filter((_, i) => i !== idx);
+                        setPeriodForm({
+                          ...periodForm,
+                          sessionConfig: {
+                            ...periodForm.sessionConfig,
+                            sessions: updated,
+                            totalSessions: updated.length,
+                          },
+                        });
+                      }}
+                      title="Hapus sesi ini"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
           <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs font-semibold text-slate-800">
             <input
               type="checkbox"
@@ -656,14 +899,14 @@ export default function Pergantian() {
               checked={periodForm.isOpen}
               onChange={(e) => setPeriodForm({ ...periodForm, isOpen: e.target.checked })}
             />
-            Buka Pengajuan (Relawan Dapat Mengisi Form)
+            Buka Pengajuan (Relawan Dapat Mengisi Formulir)
           </label>
 
           <div>
             <label className="label">Catatan Tambahan (opsional)</label>
             <input
               className="input"
-              placeholder="Contoh: Terbuka untuk periode Maret 2026"
+              placeholder="Contoh: Terbuka untuk periode September 2026"
               value={periodForm.notes}
               onChange={(e) => setPeriodForm({ ...periodForm, notes: e.target.value })}
             />

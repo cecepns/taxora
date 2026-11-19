@@ -11,6 +11,7 @@ import {
   Eye,
   FileCheck,
   ImageIcon,
+  Images,
   Info,
   LayoutGrid,
   List,
@@ -22,6 +23,7 @@ import {
   Sparkles,
   Trash2,
   Trophy,
+  X,
 } from "lucide-react";
 import DataTable from "@/components/DataTable";
 import Modal from "@/components/Modal";
@@ -67,6 +69,10 @@ export default function Pengumuman() {
   });
   const [coverFile, setCoverFile] = useState(null);
   const [coverPreview, setCoverPreview] = useState("");
+  const [galleryFiles, setGalleryFiles] = useState([]);
+  const [galleryPreviews, setGalleryPreviews] = useState([]);
+  const [existingGallery, setExistingGallery] = useState([]);
+  const [lightboxImg, setLightboxImg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [detailModal, setDetailModal] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
@@ -76,6 +82,18 @@ export default function Pengumuman() {
   const openModal = (ann = null) => {
     setCoverFile(null);
     setCoverPreview(ann?.cover_image ? getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id)) : "");
+    setGalleryFiles([]);
+    setGalleryPreviews([]);
+    let prevGallery = [];
+    if (ann?.gallery_images) {
+      try {
+        prevGallery = typeof ann.gallery_images === "string" ? JSON.parse(ann.gallery_images) : ann.gallery_images;
+        if (!Array.isArray(prevGallery)) prevGallery = [];
+      } catch (e) {
+        prevGallery = [];
+      }
+    }
+    setExistingGallery(prevGallery);
     setModal(ann || {});
     setForm({
       title: ann?.title || "",
@@ -97,6 +115,15 @@ export default function Pengumuman() {
     }
   };
 
+  const handleGalleryChange = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length) {
+      setGalleryFiles((prev) => [...prev, ...files]);
+      const urls = files.map((f) => URL.createObjectURL(f));
+      setGalleryPreviews((prev) => [...prev, ...urls]);
+    }
+  };
+
   const save = async (e) => {
     e.preventDefault();
     if (!form.title.trim()) return toast.error("Judul pengumuman wajib diisi");
@@ -106,6 +133,12 @@ export default function Pengumuman() {
     const fd = new FormData();
     Object.entries(form).forEach(([k, v]) => fd.append(k, v));
     if (coverFile) fd.append("cover", coverFile);
+    if (galleryFiles.length) {
+      galleryFiles.forEach((file) => fd.append("gallery", file));
+    }
+    if (modal?.id) {
+      fd.append("existingGallery", JSON.stringify(existingGallery));
+    }
 
     const r = modal?.id
       ? await request("put", API_ENDPOINTS.ANNOUNCEMENTS.DETAIL(modal.id), fd, { success: true })
@@ -481,6 +514,39 @@ export default function Pengumuman() {
               {detailModal.content}
             </div>
 
+            {/* Galeri Foto Tambahan */}
+            {detailModal.gallery_images && (() => {
+              let list = [];
+              try {
+                list = typeof detailModal.gallery_images === "string" ? JSON.parse(detailModal.gallery_images) : detailModal.gallery_images;
+              } catch (e) {}
+              if (!Array.isArray(list) || !list.length) return null;
+              return (
+                <div className="space-y-2 pt-3 border-t border-slate-100">
+                  <div className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Images size={14} className="text-brand" /> Galeri Foto Pengumuman ({list.length})
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    {list.map((_, idx) => (
+                      <div
+                        key={idx}
+                        className="group relative h-24 overflow-hidden rounded-xl border border-slate-200 bg-slate-100 cursor-zoom-in hover:shadow-md transition"
+                        onClick={() => setLightboxImg(getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.GALLERY(detailModal.id, idx)))}
+                        title="Klik untuk memperbesar"
+                      >
+                        <img
+                          src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.GALLERY(detailModal.id, idx))}
+                          alt={`Galeri ${idx + 1}`}
+                          className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="flex justify-end pt-2 border-t border-slate-100">
               <button type="button" className="btn" onClick={() => setDetailModal(null)}>
                 Tutup
@@ -488,6 +554,24 @@ export default function Pengumuman() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Modal Lightbox Foto Full Size */}
+      <Modal
+        open={!!lightboxImg}
+        title="Pratinjau Foto"
+        onClose={() => setLightboxImg(null)}
+        maxWidth="max-w-3xl"
+      >
+        <div className="flex justify-center p-2">
+          {lightboxImg && (
+            <img
+              src={lightboxImg}
+              alt="Pratinjau"
+              className="max-h-[75vh] rounded-2xl object-contain shadow-lg"
+            />
+          )}
+        </div>
       </Modal>
 
       {/* Modal Buat / Edit Pengumuman (Admin) */}
@@ -580,6 +664,66 @@ export default function Pengumuman() {
             {coverPreview && (
               <div className="mt-2 h-28 w-44 overflow-hidden rounded-xl border border-slate-200">
                 <img src={coverPreview} alt="Cover preview" className="h-full w-full object-cover" />
+              </div>
+            )}
+          </div>
+
+          {/* Upload Foto Tambahan / Galeri (Lebih Dari 1 Foto) */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="label !mb-0 font-bold flex items-center gap-1.5 text-slate-800">
+                <Images size={15} className="text-brand" /> Foto Tambahan / Galeri (Bisa Lebih Dari 1)
+              </label>
+              <span className="text-xs font-semibold text-slate-500">
+                {existingGallery.length + galleryFiles.length} foto dipilih
+              </span>
+            </div>
+            <p className="text-xs text-slate-500">
+              Pilih satu atau beberapa foto kegiatan/panduan sekaligus untuk melengkapi pengumuman.
+            </p>
+            <input
+              type="file"
+              accept="image/*"
+              multiple
+              className="input file:mr-3 file:rounded-lg file:border-0 file:bg-slate-700 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-white"
+              onChange={handleGalleryChange}
+            />
+            {/* Pratinjau Foto Galeri */}
+            {(existingGallery.length > 0 || galleryPreviews.length > 0) && (
+              <div className="flex flex-wrap gap-2 pt-1.5">
+                {existingGallery.map((_, idx) => (
+                  <div key={`ex-${idx}`} className="relative h-20 w-20 overflow-hidden rounded-xl border border-slate-300 group">
+                    <img
+                      src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.GALLERY(modal.id, idx))}
+                      alt="Galeri"
+                      className="h-full w-full object-cover"
+                    />
+                    <button
+                      type="button"
+                      className="absolute top-1 right-1 h-5 w-5 rounded-full bg-rose-600 text-white flex items-center justify-center opacity-90 hover:opacity-100 shadow"
+                      onClick={() => setExistingGallery(existingGallery.filter((_, i) => i !== idx))}
+                      title="Hapus foto ini"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
+                {galleryPreviews.map((previewUrl, idx) => (
+                  <div key={`new-${idx}`} className="relative h-20 w-20 overflow-hidden rounded-xl border border-brand/50 group">
+                    <img src={previewUrl} alt="Preview baru" className="h-full w-full object-cover" />
+                    <button
+                      type="button"
+                      className="absolute top-1 right-1 h-5 w-5 rounded-full bg-rose-600 text-white flex items-center justify-center opacity-90 hover:opacity-100 shadow"
+                      onClick={() => {
+                        setGalleryFiles(galleryFiles.filter((_, i) => i !== idx));
+                        setGalleryPreviews(galleryPreviews.filter((_, i) => i !== idx));
+                      }}
+                      title="Hapus foto ini"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                ))}
               </div>
             )}
           </div>
