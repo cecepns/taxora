@@ -247,16 +247,20 @@ export default function RelawanHome() {
         </section>
       )}
 
-      {/* Status Laporan Cards */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Status Laporan Cards (Divided 2 by 2 on mobile/tablet/laptop, 4 on wide screen) */}
+      <div className="grid gap-4 grid-cols-2 sm:grid-cols-2 lg:grid-cols-2 xl:grid-cols-4">
         {stats.map(({ label, val, icon: Icon, bg, valCls }) => (
-          <div key={label} className="card flex items-center gap-4 p-4 shadow-sm">
-            <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl ${bg}`}>
-              <Icon size={22} />
+          <div key={label} className="card flex items-center gap-4 p-4.5 sm:p-5 shadow-sm">
+            <div className={`flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl ${bg}`}>
+              <Icon size={24} />
             </div>
-            <div>
-              <div className={`text-2xl font-extrabold tabular-nums ${valCls}`}>{val}</div>
-              <div className="text-xs font-semibold text-slate-500">{label}</div>
+            <div className="min-w-0 flex-1">
+              <div className={`text-2xl sm:text-3xl font-extrabold tabular-nums tracking-tight leading-none mb-1.5 ${valCls}`}>
+                {val}
+              </div>
+              <div className="text-xs sm:text-sm font-semibold text-slate-600 leading-snug break-words">
+                {label}
+              </div>
             </div>
           </div>
         ))}

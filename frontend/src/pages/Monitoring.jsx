@@ -204,7 +204,7 @@ export default function Monitoring() {
 
       {/* Ringkasan Monitoring Lengkap (Bagian 5.1) */}
       {summary && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-7">
           {[
             ["Hadir", summary.hadir, "bg-emerald-50 text-emerald-800"],
             ["Tidak Hadir", summary.tidak_hadir, "bg-rose-50 text-rose-800"],
@@ -214,9 +214,9 @@ export default function Monitoring() {
             ["Menunggu", summary.menunggu, "bg-purple-50 text-purple-800"],
             ["Total WP", summary.total_wp, "bg-brand-50 text-brand"],
           ].map(([label, val, cls]) => (
-            <div key={label} className={`rounded-2xl border border-slate-200/70 p-3.5 ${cls}`}>
-              <div className="text-xl font-extrabold tabular-nums">{val ?? 0}</div>
-              <div className="text-[11px] font-semibold opacity-80">{label}</div>
+            <div key={label} className={`rounded-2xl border border-slate-200/70 p-3.5 sm:p-4 ${cls}`}>
+              <div className="text-xl sm:text-2xl font-extrabold tabular-nums tracking-tight leading-none mb-1.5">{val ?? 0}</div>
+              <div className="text-xs font-semibold opacity-90 leading-snug">{label}</div>
             </div>
           ))}
         </div>

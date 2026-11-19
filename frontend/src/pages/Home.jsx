@@ -105,7 +105,7 @@ export default function Home() {
   };
 
   const totals = d
-    ? STAT_CONFIG.slice(0, 5).reduce((acc, s) => {
+    ? STAT_CONFIG.reduce((acc, s) => {
         acc[s.key] = d.reduce((sum, p) => sum + Number(p[s.key] || 0), 0);
         return acc;
       }, {})
@@ -132,7 +132,7 @@ export default function Home() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
-            <div className="w-32 text-slate-800">
+            <div className="w-40 sm:w-44 min-w-[140px] text-slate-800">
               <AppSelect
                 size="sm"
                 isSearchable={false}
@@ -152,8 +152,8 @@ export default function Home() {
       {/* Loading Skeleton */}
       {!d ? (
         <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            {[...Array(5)].map((_, i) => (
+          <div className="grid gap-4 grid-cols-2 md:grid-cols-2 lg:grid-cols-3">
+            {[...Array(6)].map((_, i) => (
               <div key={i} className="h-28 animate-pulse rounded-2xl bg-slate-200/80" />
             ))}
           </div>
@@ -165,24 +165,26 @@ export default function Home() {
         </div>
       ) : (
         <>
-          {/* Aggregate KPI Row when Admin views multiple programs */}
+          {/* Aggregate KPI Row when Admin views multiple programs (Divided 2 by 2 on mobile/tablet, 3 by 3 on desktop) */}
           {d.length > 1 && totals && (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-              {STAT_CONFIG.slice(0, 5).map(({ key, label, icon: Icon, iconBg, valColor }) => (
+            <div className="grid gap-4 grid-cols-2 md:grid-cols-2 lg:grid-cols-3">
+              {STAT_CONFIG.map(({ key, label, icon: Icon, iconBg, valColor }) => (
                 <div
                   key={key}
-                  className="card group flex items-center gap-4 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
+                  className="card group flex items-center gap-4 p-4.5 sm:p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md"
                 >
                   <div
-                    className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl transition-transform duration-200 group-hover:scale-105 ${iconBg}`}
+                    className={`flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl transition-transform duration-200 group-hover:scale-105 ${iconBg}`}
                   >
-                    <Icon size={22} />
+                    <Icon size={24} />
                   </div>
-                  <div className="min-w-0">
-                    <div className={`text-2xl font-extrabold tabular-nums ${valColor}`}>
-                      {Number(totals[key]).toLocaleString("id-ID")}
+                  <div className="min-w-0 flex-1">
+                    <div className={`text-2xl sm:text-3xl font-extrabold tabular-nums tracking-tight leading-none mb-1.5 ${valColor}`}>
+                      {Number(totals[key] || 0).toLocaleString("id-ID")}
                     </div>
-                    <div className="truncate text-xs font-semibold text-slate-500">{label}</div>
+                    <div className="text-xs sm:text-sm font-semibold text-slate-600 leading-snug break-words">
+                      {label}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -237,10 +239,10 @@ export default function Home() {
                             <Icon size={20} />
                           </div>
                         </div>
-                        <dd className={`text-2xl font-extrabold tabular-nums ${valColor}`}>
+                        <dd className={`text-2xl sm:text-3xl font-extrabold tabular-nums tracking-tight leading-none mb-1.5 ${valColor}`}>
                           {Number(p[key] || 0).toLocaleString("id-ID")}
                         </dd>
-                        <dt className="mt-0.5 text-xs font-semibold text-slate-600">{label}</dt>
+                        <dt className="text-xs sm:text-sm font-semibold text-slate-600 leading-snug">{label}</dt>
                       </div>
                     ))}
                   </dl>
