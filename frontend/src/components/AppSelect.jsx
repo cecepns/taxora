@@ -4,14 +4,14 @@ import CreatableSelect from "react-select/creatable";
 const buildStyles = (size) => ({
   control: (base, state) => ({
     ...base,
-    minHeight: size === "sm" ? "42px" : "46px",
+    minHeight: size === "sm" ? "40px" : "42px",
     borderRadius: "0.75rem",
     borderColor: state.isFocused ? "#0E5A7C" : "#e2e8f0",
     backgroundColor: state.isDisabled ? "#f1f5f9" : "#ffffff",
     boxShadow: state.isFocused
       ? "0 0 0 4px rgba(14, 90, 124, 0.1)"
       : "0 1px 2px 0 rgba(15, 23, 42, 0.04)",
-    fontSize: "0.9375rem",
+    fontSize: "0.875rem",
     cursor: state.isDisabled ? "not-allowed" : "pointer",
     transition: "all 150ms ease",
     "&:hover": {
@@ -74,7 +74,7 @@ const buildStyles = (size) => ({
   option: (base, state) => ({
     ...base,
     borderRadius: "0.55rem",
-    fontSize: "0.9375rem",
+    fontSize: "0.875rem",
     padding: "8px 12px",
     cursor: "pointer",
     fontWeight: state.isSelected ? 600 : 500,

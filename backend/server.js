@@ -1262,6 +1262,9 @@ app.get("/api/evidence/:id/:field", auth(), ah(async (q, s) => {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
     ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".svg": "image/svg+xml",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",
     ".csv": "text/csv",
@@ -1271,12 +1274,23 @@ app.get("/api/evidence/:id/:field", auth(), ah(async (q, s) => {
   const fname = path.basename(abs);
   s.setHeader("Content-Type", mime);
   s.setHeader("Access-Control-Allow-Origin", "*");
+  s.setHeader("Access-Control-Allow-Headers", "*");
+  s.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  s.setHeader("Accept-Ranges", "bytes");
   if (q.query.download === "1" || [".xlsx", ".xls", ".csv", ".docx"].includes(ext)) {
     s.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
     return s.download(abs, fname);
   }
   s.setHeader("Content-Disposition", `inline; filename="${fname}"`);
-  s.sendFile(abs);
+  s.sendFile(abs, {
+    headers: {
+      "Content-Type": mime,
+      "Content-Disposition": `inline; filename="${fname}"`,
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+    },
+  });
 }));
 
 app.post("/api/evidence/:id/:field/share", auth("pengurus", "admin"), ah(async (q, s) => {
@@ -1313,20 +1327,35 @@ app.get("/api/public/evidence/:token", ah(async (q, s) => {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
     ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".svg": "image/svg+xml",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xls": "application/vnd.ms-excel",
     ".csv": "text/csv",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   };
   const mime = mimeTypes[ext] || "application/octet-stream";
   s.setHeader("Content-Type", mime);
   s.setHeader("Access-Control-Allow-Origin", "*");
+  s.setHeader("Access-Control-Allow-Headers", "*");
+  s.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  s.setHeader("Accept-Ranges", "bytes");
   const fname = path.basename(abs);
-  if (q.query.download === "1" || [".xlsx", ".xls", ".csv"].includes(ext)) {
+  if (q.query.download === "1" || [".xlsx", ".xls", ".csv", ".docx"].includes(ext)) {
     s.setHeader("Content-Disposition", `attachment; filename="${fname}"`);
     return s.download(abs, fname);
   }
   s.setHeader("Content-Disposition", `inline; filename="${fname}"`);
-  s.sendFile(abs);
+  s.sendFile(abs, {
+    headers: {
+      "Content-Type": mime,
+      "Content-Disposition": `inline; filename="${fname}"`,
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+    },
+  });
 }));
 
 // ---------- ringkasan, audit, tutup tahun ----------
@@ -1622,10 +1651,21 @@ app.get("/api/materi/:id/cover", ah(async (q, s) => {
   }
   const abs = path.resolve(mat.cover_image);
   const ext = path.extname(abs).toLowerCase();
-  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }[ext] || "image/jpeg";
+  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif" }[ext] || "image/jpeg";
   s.setHeader("Content-Type", mime);
+  s.setHeader("Access-Control-Allow-Origin", "*");
+  s.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  s.setHeader("Accept-Ranges", "bytes");
   s.setHeader("Content-Disposition", "inline");
-  s.sendFile(abs);
+  s.sendFile(abs, {
+    headers: {
+      "Content-Type": mime,
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+      "Content-Disposition": "inline",
+    },
+  });
 }));
 
 app.get("/api/materi/:id/download", auth(), ah(async (q, s) => {
@@ -1661,9 +1701,19 @@ app.get("/api/materi/:id/download", auth(), ah(async (q, s) => {
   const downloadName = `${safeTitle}${ext}`;
   s.setHeader("Content-Type", mime);
   s.setHeader("Access-Control-Allow-Origin", "*");
+  s.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  s.setHeader("Accept-Ranges", "bytes");
   if (q.query.preview === "1" && [".pdf", ".png", ".jpg", ".jpeg", ".webp"].includes(ext)) {
     s.setHeader("Content-Disposition", `inline; filename="${downloadName}"`);
-    return s.sendFile(absTarget);
+    return s.sendFile(absTarget, {
+      headers: {
+        "Content-Type": mime,
+        "Content-Disposition": `inline; filename="${downloadName}"`,
+        "Cross-Origin-Resource-Policy": "cross-origin",
+        "Access-Control-Allow-Origin": "*",
+        "Accept-Ranges": "bytes",
+      },
+    });
   }
   s.setHeader("Content-Disposition", `attachment; filename="${downloadName}"`);
   return s.download(absTarget, downloadName);
@@ -2478,10 +2528,21 @@ app.get("/api/profile/photo/:id", ah(async (q, s) => {
   }
   const abs = path.resolve(user.profile_photo);
   const ext = path.extname(abs).toLowerCase();
-  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }[ext] || "image/jpeg";
+  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif" }[ext] || "image/jpeg";
   s.setHeader("Content-Type", mime);
+  s.setHeader("Access-Control-Allow-Origin", "*");
+  s.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  s.setHeader("Accept-Ranges", "bytes");
   s.setHeader("Content-Disposition", "inline");
-  s.sendFile(abs);
+  s.sendFile(abs, {
+    headers: {
+      "Content-Type": mime,
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+      "Content-Disposition": "inline",
+    },
+  });
 }));
 
 // ---------- pencatatan aktivitas presensi ----------
@@ -2643,10 +2704,21 @@ app.get("/api/announcements/:id/cover", ah(async (q, s) => {
   }
   const abs = path.resolve(ann.cover_image);
   const ext = path.extname(abs).toLowerCase();
-  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp" }[ext] || "image/jpeg";
+  const mime = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".heic": "image/heic", ".heif": "image/heif" }[ext] || "image/jpeg";
   s.setHeader("Content-Type", mime);
+  s.setHeader("Access-Control-Allow-Origin", "*");
+  s.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+  s.setHeader("Accept-Ranges", "bytes");
   s.setHeader("Content-Disposition", "inline");
-  s.sendFile(abs);
+  s.sendFile(abs, {
+    headers: {
+      "Content-Type": mime,
+      "Cross-Origin-Resource-Policy": "cross-origin",
+      "Access-Control-Allow-Origin": "*",
+      "Accept-Ranges": "bytes",
+      "Content-Disposition": "inline",
+    },
+  });
 }));
 
 // ---------- periode & pengajuan sesi jaga reguler ----------

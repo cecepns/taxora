@@ -22,9 +22,9 @@ export default function StatusBadge({ s, note }) {
   return (
     <span
       title={note || ""}
-      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold capitalize ring-1 ${st.pill}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold capitalize ring-1 ${st.pill}`}
     >
-      <span className={`h-2 w-2 rounded-full ${st.dot}`} />
+      <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
       {s}
     </span>
   );

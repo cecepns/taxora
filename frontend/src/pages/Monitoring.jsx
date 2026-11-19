@@ -26,7 +26,7 @@ import AppSelect from "@/components/AppSelect";
 import AppDatePicker from "@/components/AppDatePicker";
 import EvidencePreviewModal from "@/components/EvidencePreviewModal";
 import usePaginated from "@/hooks/usePaginated";
-import { downloadFile, fetchBlobUrl, openEvidence, request } from "@/utils/request";
+import { downloadFile, fetchBlobUrl, openEvidence, request, getAuthenticatedUrl } from "@/utils/request";
 import { API_ENDPOINTS } from "@/utils/endpoints";
 import { getUser } from "@/utils/auth";
 
@@ -107,9 +107,10 @@ export default function Monitoring() {
       reason: "",
     });
     if (r.data.photo) {
-      setPhotoLoading(true);
-      const blob = await fetchBlobUrl(API_ENDPOINTS.PRESENSI.EVIDENCE(row.id, "photo"));
-      if (blob) setPhotoPreview(blob.url);
+      setPhotoPreview(getAuthenticatedUrl(API_ENDPOINTS.PRESENSI.EVIDENCE(row.id, "photo")));
+      setPhotoLoading(false);
+    } else {
+      setPhotoPreview(null);
       setPhotoLoading(false);
     }
   };

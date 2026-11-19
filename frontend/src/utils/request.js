@@ -37,19 +37,29 @@ export async function request(method, url, data, { success = false, config } = {
   }
 }
 
-export async function openEvidence(url) {
+export function openEvidence(url) {
   const authUrl = getAuthenticatedUrl(url);
-  const win = window.open(authUrl, "_blank");
-  if (!win) {
-    // Jika diblokir oleh popup blocker Safari, alihkan ke unduhan langsung
-    downloadFile(url);
-  }
+  if (!authUrl) return;
+  const a = document.createElement("a");
+  a.href = authUrl;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
 }
 
 export async function fetchBlobUrl(url) {
-  const res = await api.get(url, { responseType: "blob" }).catch(() => null);
-  if (!res) return null;
-  return { url: URL.createObjectURL(res.data), type: res.data.type };
+  try {
+    const res = await api.get(url, { responseType: "blob" });
+    if (!res || !res.data) return null;
+    return {
+      url: URL.createObjectURL(res.data),
+      type: res.data.type || res.headers?.["content-type"] || "",
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function downloadFile(url, params = {}, fallbackName = "unduhan") {

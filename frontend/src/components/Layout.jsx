@@ -98,7 +98,7 @@ export default function Layout() {
             </div>
             <div>
               <div className="text-xl font-extrabold tracking-wide text-white">TAXORA</div>
-              <div className="text-sm font-medium text-sky-100/80">
+              <div className="text-xs font-medium text-sky-100/75">
                 {u.programName || "Tax Center PKN STAN"}
               </div>
             </div>
@@ -114,7 +114,7 @@ export default function Layout() {
         </div>
 
         <div className="px-5 pb-2 pt-4">
-          <span className="text-xs font-bold uppercase tracking-widest text-sky-200/70">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-sky-200/60">
             Menu Utama
           </span>
         </div>
@@ -210,7 +210,7 @@ export default function Layout() {
             </Link>
             <Link
               to="/profil"
-              className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-light text-sm font-bold text-brand ring-1 ring-brand/15 hover:ring-brand/40 transition"
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-light text-xs font-bold text-brand ring-1 ring-brand/15 hover:ring-brand/40 transition"
               title="Buka Profil"
             >
               {getInitials(u.name)}
@@ -218,19 +218,19 @@ export default function Layout() {
             <button
               type="button"
               title="Ganti Password"
-              className="btn-ghost !px-3 !py-2 text-sm"
+              className="btn-ghost !px-2.5 !py-2 text-xs"
               onClick={() => setPwOpen(true)}
             >
-              <KeyRound size={16} />
+              <KeyRound size={15} />
               <span className="hidden md:inline">Password</span>
             </button>
             <button
               type="button"
-              className="btn-ghost !px-3.5 !py-2 text-sm"
+              className="btn-ghost !px-3 !py-2 text-xs"
               onClick={logout}
               aria-label="Keluar"
             >
-              <LogOut size={16} />
+              <LogOut size={15} />
               <span className="hidden sm:inline">Keluar</span>
             </button>
           </div>
