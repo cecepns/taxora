@@ -25,7 +25,7 @@ import AppSelect from "@/components/AppSelect";
 import AppDatePicker from "@/components/AppDatePicker";
 import EvidencePreviewModal from "@/components/EvidencePreviewModal";
 import usePaginated from "@/hooks/usePaginated";
-import { downloadFile, request } from "@/utils/request";
+import { downloadFile, request, getAuthenticatedUrl } from "@/utils/request";
 import { API_ENDPOINTS } from "@/utils/endpoints";
 import { getUser } from "@/utils/auth";
 
@@ -61,7 +61,7 @@ export default function Materi() {
   const isAdmin = user.role === "admin";
   const [category, setCategory] = useState("");
   const [pid, setPid] = useState("");
-  const [viewMode, setViewMode] = useState(user.role === "relawan" ? "grid" : "grid"); // default grid visual per brief
+  const [viewMode, setViewMode] = useState(user.role === "relawan" ? "grid" : "table");
 
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({
@@ -110,7 +110,7 @@ export default function Materi() {
   const openModal = (row = null) => {
     setFile(null);
     setCoverFile(null);
-    setCoverPreview(row?.cover_image ? API_ENDPOINTS.MATERI.COVER(row.id) : "");
+    setCoverPreview(row?.cover_image ? getAuthenticatedUrl(API_ENDPOINTS.MATERI.COVER(row.id)) : "");
     setModal(row || {});
     setForm({
       programId: row?.program_id ? String(row.program_id) : String(user.programId || "1"),
@@ -168,6 +168,8 @@ export default function Materi() {
       t.reload();
     }
   };
+
+  const materials = t.rows || t.data || [];
 
   return (
     <div className="space-y-6">
@@ -230,9 +232,9 @@ export default function Materi() {
       {/* TAMPILAN KARTU VISUAL (COVER GRID) */}
       {viewMode === "grid" && (
         <div>
-          {t.data?.length > 0 ? (
+          {materials.length > 0 ? (
             <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-              {t.data.map((r) => {
+              {materials.map((r) => {
                 const grad = CATEGORY_GRADIENTS[r.category] || "from-slate-700 to-slate-900";
                 return (
                   <div
@@ -243,7 +245,7 @@ export default function Materi() {
                     <div className="relative aspect-[16/10] w-full overflow-hidden bg-slate-900">
                       {r.cover_image ? (
                         <img
-                          src={API_ENDPOINTS.MATERI.COVER(r.id)}
+                          src={getAuthenticatedUrl(API_ENDPOINTS.MATERI.COVER(r.id))}
                           alt={r.title}
                           className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
                         />
@@ -392,7 +394,7 @@ export default function Materi() {
               render: (r) => (
                 <div className="h-12 w-16 overflow-hidden rounded-lg bg-slate-100 shrink-0 border border-slate-200">
                   {r.cover_image ? (
-                    <img src={API_ENDPOINTS.MATERI.COVER(r.id)} alt={r.title} className="h-full w-full object-cover" />
+                    <img src={getAuthenticatedUrl(API_ENDPOINTS.MATERI.COVER(r.id))} alt={r.title} className="h-full w-full object-cover" />
                   ) : (
                     <div className="h-full w-full flex items-center justify-center bg-brand-light text-brand">
                       <BookOpen size={16} />

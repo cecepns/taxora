@@ -12,10 +12,13 @@ import {
   FileCheck,
   ImageIcon,
   Info,
+  LayoutGrid,
+  List,
   Loader2,
   Megaphone,
   Pencil,
   Plus,
+  Search,
   Sparkles,
   Trash2,
   Trophy,
@@ -25,7 +28,7 @@ import Modal from "@/components/Modal";
 import PageHeader from "@/components/PageHeader";
 import AppSelect from "@/components/AppSelect";
 import usePaginated from "@/hooks/usePaginated";
-import { request } from "@/utils/request";
+import { request, getAuthenticatedUrl } from "@/utils/request";
 import { API_ENDPOINTS } from "@/utils/endpoints";
 import { getUser } from "@/utils/auth";
 
@@ -50,6 +53,7 @@ export default function Pengumuman() {
 
   const [category, setCategory] = useState("");
   const [pid, setPid] = useState("");
+  const [viewMode, setViewMode] = useState(user.role === "relawan" ? "grid" : "table");
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState({
     title: "",
@@ -71,7 +75,7 @@ export default function Pengumuman() {
 
   const openModal = (ann = null) => {
     setCoverFile(null);
-    setCoverPreview(ann?.cover_image ? API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id) : "");
+    setCoverPreview(ann?.cover_image ? getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id)) : "");
     setModal(ann || {});
     setForm({
       title: ann?.title || "",
@@ -124,6 +128,8 @@ export default function Pengumuman() {
     }
   };
 
+  const announcements = t.rows || t.data || [];
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -131,12 +137,35 @@ export default function Pengumuman() {
         title="Pengumuman, Informasi & Relawan Terbaik"
         subtitle="Pusat informasi resmi, panduan teknis pelaporan RENJANI, dan publikasi Relawan of the Month."
         actions={
-          canManage && (
-            <button type="button" className="btn" onClick={() => openModal(null)}>
-              <Plus size={18} />
-              Buat Pengumuman Baru
-            </button>
-          )
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex items-center rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setViewMode("grid")}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                  viewMode === "grid" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <LayoutGrid size={14} /> Kartu Visual
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                  viewMode === "table" ? "bg-brand text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                <List size={14} /> Tabel
+              </button>
+            </div>
+
+            {canManage && (
+              <button type="button" className="btn" onClick={() => openModal(null)}>
+                <Plus size={18} />
+                Buat Pengumuman Baru
+              </button>
+            )}
+          </div>
         }
       />
 
@@ -152,108 +181,245 @@ export default function Pengumuman() {
         </div>
       </div>
 
-      {/* Grid Kartu Pengumuman */}
-      {t.data?.length > 0 ? (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {t.data.map((ann) => {
-            const isRotm = ann.category === "rotm";
-            return (
-              <div
-                key={ann.id}
-                className={`card flex flex-col justify-between overflow-hidden border shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${
-                  isRotm
-                    ? "border-amber-300 bg-gradient-to-br from-amber-50/70 via-white to-amber-50/30"
-                    : "border-slate-200"
-                }`}
-              >
-                <div>
-                  {/* Cover Image Area */}
-                  {ann.cover_image ? (
-                    <div className="h-44 w-full overflow-hidden bg-slate-900">
-                      <img
-                        src={API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id)}
-                        alt={ann.title}
-                        className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-                      />
-                    </div>
-                  ) : isRotm ? (
-                    <div className="h-32 w-full bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 p-4 flex flex-col justify-between text-white">
-                      <div className="flex justify-between items-center">
-                        <Trophy size={28} className="text-white/90" />
-                        <Sparkles size={20} className="text-amber-200 animate-pulse" />
-                      </div>
-                      <div className="text-xs font-bold uppercase tracking-wider">Apresiasi Relawan Terbaik</div>
-                    </div>
-                  ) : null}
+      {/* TAMPILAN KARTU VISUAL (GRID) */}
+      {viewMode === "grid" && (
+        <div>
+          {announcements.length > 0 ? (
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {announcements.map((ann) => {
+                const isRotm = ann.category === "rotm";
+                return (
+                  <div
+                    key={ann.id}
+                    className={`card flex flex-col justify-between overflow-hidden border shadow-sm transition-all duration-200 hover:-translate-y-1 hover:shadow-lg ${
+                      isRotm
+                        ? "border-amber-300 bg-gradient-to-br from-amber-50/70 via-white to-amber-50/30"
+                        : "border-slate-200"
+                    }`}
+                  >
+                    <div>
+                      {/* Cover Image Area */}
+                      {ann.cover_image ? (
+                        <div className="h-44 w-full overflow-hidden bg-slate-900">
+                          <img
+                            src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id))}
+                            alt={ann.title}
+                            className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
+                          />
+                        </div>
+                      ) : isRotm ? (
+                        <div className="h-32 w-full bg-gradient-to-r from-amber-400 via-amber-500 to-orange-500 p-4 flex flex-col justify-between text-white">
+                          <div className="flex justify-between items-center">
+                            <Trophy size={28} className="text-white/90" />
+                            <Sparkles size={20} className="text-amber-200 animate-pulse" />
+                          </div>
+                          <div className="text-xs font-bold uppercase tracking-wider">Apresiasi Relawan Terbaik</div>
+                        </div>
+                      ) : null}
 
-                  <div className="p-5 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <span
-                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${
-                          isRotm
-                            ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
-                            : ann.category === "urgent"
-                            ? "bg-rose-100 text-rose-700"
-                            : ann.category === "panduan"
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-brand-50 text-brand"
-                        }`}
-                      >
-                        {isRotm ? "Relawan of the Month" : ann.category}
-                      </span>
-                      <span className="text-[11px] text-slate-400">
-                        {ann.created_at ? String(ann.created_at).slice(0, 10) : ""}
-                      </span>
-                    </div>
+                      <div className="p-5 space-y-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold uppercase tracking-wider ${
+                              isRotm
+                                ? "bg-amber-100 text-amber-800 ring-1 ring-amber-300"
+                                : ann.category === "urgent"
+                                ? "bg-rose-100 text-rose-700"
+                                : ann.category === "panduan"
+                                ? "bg-emerald-100 text-emerald-800"
+                                : "bg-brand-50 text-brand"
+                            }`}
+                          >
+                            {isRotm ? "Relawan of the Month" : ann.category}
+                          </span>
+                          <span className="text-[11px] text-slate-400">
+                            {ann.created_at ? String(ann.created_at).slice(0, 10) : ""}
+                          </span>
+                        </div>
 
-                    <h3 className="font-extrabold text-slate-900 text-base leading-snug line-clamp-2">
-                      {ann.title}
-                    </h3>
+                        <h3 className="font-extrabold text-slate-900 text-base leading-snug line-clamp-2">
+                          {ann.title}
+                        </h3>
 
-                    {isRotm && ann.rotm_user_name && (
-                      <div className="rounded-xl border border-amber-200 bg-amber-100/60 p-2.5 text-xs font-bold text-amber-950 flex items-center gap-2">
-                        <Trophy size={16} className="text-amber-600 shrink-0" />
-                        <div>
-                          <div>Pemenang: <span className="text-brand font-extrabold">{ann.rotm_user_name}</span></div>
-                          <div className="text-[11px] font-normal text-amber-800">{ann.rotm_period || "Periode Berjalan"}</div>
+                        {isRotm && ann.rotm_user_name && (
+                          <div className="rounded-xl border border-amber-200 bg-amber-100/60 p-2.5 text-xs font-bold text-amber-950 flex items-center gap-2">
+                            <Trophy size={16} className="text-amber-600 shrink-0" />
+                            <div>
+                              <div>Pemenang: <span className="text-brand font-extrabold">{ann.rotm_user_name}</span></div>
+                              <div className="text-[11px] font-normal text-amber-800">{ann.rotm_period || "Periode Berjalan"}</div>
+                            </div>
+                          </div>
+                        )}
+
+                        <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed whitespace-pre-line">
+                          {ann.content}
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-slate-400">
+                          <span>{ann.program_name || "Semua Program"}</span>
+                          {ann.is_popup ? (
+                            <>
+                              <span>•</span>
+                              <span className="font-semibold text-brand flex items-center gap-1">
+                                <Sparkles size={11} /> Pop-up Aktif
+                              </span>
+                            </>
+                          ) : null}
                         </div>
                       </div>
-                    )}
+                    </div>
 
-                    <p className="text-xs text-slate-600 line-clamp-3 leading-relaxed whitespace-pre-line">
-                      {ann.content}
-                    </p>
+                    {/* Footer Actions */}
+                    <div className="p-5 pt-0 border-t border-slate-100 flex items-center justify-between gap-2 mt-2">
+                      <button
+                        type="button"
+                        className="btn !rounded-xl !px-3.5 !py-1.5 text-xs"
+                        onClick={() => setDetailModal(ann)}
+                      >
+                        Baca Lengkap
+                      </button>
 
-                    <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px] text-slate-400">
-                      <span>{ann.program_name || "Semua Program"}</span>
-                      {ann.is_popup ? (
-                        <>
-                          <span>•</span>
-                          <span className="font-semibold text-brand flex items-center gap-1">
-                            <Sparkles size={11} /> Pop-up Aktif
-                          </span>
-                        </>
-                      ) : null}
+                      {canManage && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            title="Ubah pengumuman"
+                            className="btn-ghost !p-2 !rounded-lg text-slate-600 hover:text-brand"
+                            onClick={() => openModal(ann)}
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Hapus pengumuman"
+                            className="btn-ghost !p-2 !rounded-lg text-rose-600 hover:!bg-rose-50"
+                            onClick={() => setDeleteTarget(ann)}
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="card p-12 text-center text-slate-400 text-sm">
+              Belum ada pengumuman pada kategori ini.
+            </div>
+          )}
+        </div>
+      )}
 
-                {/* Footer Actions */}
-                <div className="p-5 pt-0 border-t border-slate-100 flex items-center justify-between gap-2 mt-2">
+      {/* TAMPILAN TABEL PENGUMUMAN */}
+      {viewMode === "table" && (
+        <DataTable
+          t={t}
+          searchPlaceholder="Cari judul, isi pengumuman, atau nama relawan..."
+          columns={[
+            {
+              label: "Sampul",
+              render: (ann) => (
+                <div className="h-12 w-16 overflow-hidden rounded-lg bg-slate-100 shrink-0 border border-slate-200">
+                  {ann.cover_image ? (
+                    <img
+                      src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(ann.id))}
+                      alt={ann.title}
+                      className="h-full w-full object-cover"
+                    />
+                  ) : ann.category === "rotm" ? (
+                    <div className="h-full w-full flex items-center justify-center bg-amber-500 text-white">
+                      <Trophy size={16} />
+                    </div>
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center bg-brand-light text-brand">
+                      <Megaphone size={16} />
+                    </div>
+                  )}
+                </div>
+              ),
+            },
+            {
+              label: "Pengumuman",
+              render: (ann) => (
+                <div>
+                  <div className="font-bold text-slate-900">{ann.title}</div>
+                  <div className="mt-0.5 text-xs text-slate-500 line-clamp-1">{ann.content}</div>
+                  {ann.category === "rotm" && ann.rotm_user_name && (
+                    <div className="mt-1 text-xs font-semibold text-amber-700">
+                      Pemenang ROTM: {ann.rotm_user_name} ({ann.rotm_period || "Periode Berjalan"})
+                    </div>
+                  )}
+                  <div className="mt-1 flex flex-wrap gap-1.5 text-[11px] text-slate-400">
+                    <span>{ann.created_at ? String(ann.created_at).slice(0, 10) : ""}</span>
+                    <span>•</span>
+                    <span>Oleh {ann.author_name || "Admin"}</span>
+                    <span>•</span>
+                    <span>{ann.program_name || "Semua Program"}</span>
+                  </div>
+                </div>
+              ),
+            },
+            {
+              label: "Kategori",
+              render: (ann) => {
+                const isRotm = ann.category === "rotm";
+                return (
+                  <span
+                    className={`rounded-full px-2.5 py-0.5 text-xs font-semibold capitalize ring-1 ${
+                      isRotm
+                        ? "bg-amber-50 text-amber-800 ring-amber-300"
+                        : ann.category === "urgent"
+                        ? "bg-rose-50 text-rose-700 ring-rose-200"
+                        : ann.category === "panduan"
+                        ? "bg-emerald-50 text-emerald-800 ring-emerald-200"
+                        : "bg-brand-50 text-brand ring-brand/20"
+                    }`}
+                  >
+                    {isRotm ? "ROTM" : ann.category}
+                  </span>
+                );
+              },
+            },
+            {
+              label: "Status",
+              render: (ann) => (
+                <div className="flex flex-col gap-1">
+                  <span
+                    className={`inline-flex items-center gap-1 text-xs font-semibold ${
+                      ann.active ? "text-emerald-700" : "text-slate-400"
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${ann.active ? "bg-emerald-500" : "bg-slate-400"}`} />
+                    {ann.active ? "Aktif" : "Nonaktif"}
+                  </span>
+                  {ann.is_popup ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-brand">
+                      <Sparkles size={11} /> Pop-up
+                    </span>
+                  ) : null}
+                </div>
+              ),
+            },
+            {
+              label: "Aksi",
+              render: (ann) => (
+                <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    className="btn !rounded-xl !px-3.5 !py-1.5 text-xs"
+                    className="btn-ghost !rounded-lg !px-2.5 !py-1.5 text-xs text-brand hover:bg-brand-50"
                     onClick={() => setDetailModal(ann)}
+                    title="Baca lengkap"
                   >
-                    Baca Lengkap
+                    <Eye size={13} /> Baca
                   </button>
-
                   {canManage && (
-                    <div className="flex items-center gap-1">
+                    <>
                       <button
                         type="button"
                         title="Ubah pengumuman"
-                        className="btn-ghost !p-2 !rounded-lg text-slate-600 hover:text-brand"
+                        className="btn-ghost !rounded-lg !px-2 !py-1.5 text-slate-600 hover:text-brand"
                         onClick={() => openModal(ann)}
                       >
                         <Pencil size={14} />
@@ -261,22 +427,18 @@ export default function Pengumuman() {
                       <button
                         type="button"
                         title="Hapus pengumuman"
-                        className="btn-ghost !p-2 !rounded-lg text-rose-600 hover:!bg-rose-50"
+                        className="btn-ghost !rounded-lg !px-2 !py-1.5 text-rose-600 hover:!bg-rose-50"
                         onClick={() => setDeleteTarget(ann)}
                       >
                         <Trash2 size={14} />
                       </button>
-                    </div>
+                    </>
                   )}
                 </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        <div className="card p-12 text-center text-slate-400 text-sm">
-          Belum ada pengumuman pada kategori ini.
-        </div>
+              ),
+            },
+          ]}
+        />
       )}
 
       {/* Modal Detail Pengumuman */}
@@ -292,7 +454,7 @@ export default function Pengumuman() {
             {detailModal.cover_image && (
               <div className="max-h-72 w-full overflow-hidden rounded-2xl bg-slate-900 flex items-center justify-center">
                 <img
-                  src={API_ENDPOINTS.ANNOUNCEMENTS.COVER(detailModal.id)}
+                  src={getAuthenticatedUrl(API_ENDPOINTS.ANNOUNCEMENTS.COVER(detailModal.id))}
                   alt={detailModal.title}
                   className="max-h-72 w-auto max-w-full object-contain"
                 />

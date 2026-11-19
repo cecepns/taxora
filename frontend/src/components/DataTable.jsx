@@ -11,7 +11,15 @@ export default function DataTable({
   empty = "Belum ada data",
   searchPlaceholder = "Cari data...",
 }) {
-  const { rows, loading, pagination: p, page, setPage, limit, setLimit, search, setSearch } = t;
+  const rows = Array.isArray(t?.rows) && t.rows.length ? t.rows : (Array.isArray(t?.data) ? t.data : (t?.rows || []));
+  const loading = t?.loading ?? false;
+  const p = t?.pagination || { page: 1, limit: 10, total: 0, totalPages: 1 };
+  const page = t?.page || 1;
+  const setPage = t?.setPage || (() => {});
+  const limit = t?.limit || 10;
+  const setLimit = t?.setLimit || (() => {});
+  const search = t?.search || "";
+  const setSearch = t?.setSearch || (() => {});
   const pages = Array.from({ length: p.totalPages }, (_, i) => i + 1).filter(
     (n) => Math.abs(n - page) <= 2 || n === 1 || n === p.totalPages
   );
