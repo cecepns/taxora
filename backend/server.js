@@ -79,8 +79,25 @@ async function ensureSchema() {
   await addColumnIfMissing("attendance", "allow_late_finish", "TINYINT NOT NULL DEFAULT 0");
   await addColumnIfMissing("announcements", "gallery_images", "JSON NULL");
   await addColumnIfMissing("schedule_submission_periods", "session_config", "JSON NULL");
+  await addColumnIfMissing("schedule_submission_periods", "duty_start_date", "DATE NULL");
+  await addColumnIfMissing("schedule_submission_periods", "duty_end_date", "DATE NULL");
   try {
     await db.query("ALTER TABLE schedule_submission_periods MODIFY COLUMN program_id INT NULL DEFAULT 0");
+  } catch (e) {}
+  await addColumnIfMissing("schedule_submissions", "priority_1_date", "DATE NULL");
+  await addColumnIfMissing("schedule_submissions", "priority_1_session", "INT NULL");
+  await addColumnIfMissing("schedule_submissions", "priority_2_date", "DATE NULL");
+  await addColumnIfMissing("schedule_submissions", "priority_2_session", "INT NULL");
+  await addColumnIfMissing("schedule_submissions", "priority_3_date", "DATE NULL");
+  await addColumnIfMissing("schedule_submissions", "priority_3_session", "INT NULL");
+  await addColumnIfMissing("schedule_submissions", "approved_priority", "INT NULL DEFAULT 1");
+  await addColumnIfMissing("schedule_submissions", "assigned_session_id", "INT NULL");
+  await addColumnIfMissing("schedule_submissions", "deployed_at", "DATETIME NULL");
+  await addColumnIfMissing("schedule_submissions", "deployed_by", "INT NULL");
+  try {
+    await db.query("ALTER TABLE schedule_submissions MODIFY COLUMN priority_1 VARCHAR(255) NOT NULL");
+    await db.query("ALTER TABLE schedule_submissions MODIFY COLUMN priority_2 VARCHAR(255) NOT NULL");
+    await db.query("ALTER TABLE schedule_submissions MODIFY COLUMN priority_3 VARCHAR(255) NOT NULL");
   } catch (e) {}
   await addColumnIfMissing("materials", "cover_image", "VARCHAR(255) NULL");
   await addColumnIfMissing("users", "profile_photo", "VARCHAR(255) NULL");
@@ -2874,16 +2891,18 @@ app.post("/api/schedule-submissions/periods", auth("pengurus", "admin"), ah(asyn
   const year = +q.body.year || new Date().getFullYear();
   const startDate = clean(q.body.startDate);
   const endDate = clean(q.body.endDate);
+  const dutyStartDate = clean(q.body.dutyStartDate) || startDate;
+  const dutyEndDate = clean(q.body.dutyEndDate) || endDate;
   const isOpen = q.body.isOpen === false || q.body.isOpen === "0" ? 0 : 1;
   const notes = clean(q.body.notes) || null;
   const sessionConfig = q.body.sessionConfig ? (typeof q.body.sessionConfig === "string" ? q.body.sessionConfig : JSON.stringify(q.body.sessionConfig)) : null;
 
-  if (!startDate || !endDate) return fail(s, 400, "Tanggal mulai dan tanggal selesai wajib diisi");
+  if (!startDate || !endDate) return fail(s, 400, "Tanggal mulai dan tanggal selesai pengajuan wajib diisi");
 
   const [res] = await db.query(
-    `INSERT INTO schedule_submission_periods(program_id, year, title, start_date, end_date, is_open, notes, session_config, created_by)
-     VALUES(?,?,?,?,?,?,?,?,?)`,
-    [pid, year, title, startDate, endDate, isOpen, notes, sessionConfig, q.u.id]
+    `INSERT INTO schedule_submission_periods(program_id, year, title, start_date, end_date, duty_start_date, duty_end_date, is_open, notes, session_config, created_by)
+     VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+    [pid, year, title, startDate, endDate, dutyStartDate, dutyEndDate, isOpen, notes, sessionConfig, q.u.id]
   );
   s.json({ success: true, message: "Periode pengajuan berhasil disimpan", data: { id: res.insertId } });
 }));
@@ -2895,16 +2914,116 @@ app.put("/api/schedule-submissions/periods/:id", auth("pengurus", "admin"), ah(a
   const title = clean(q.body.title) || per.title;
   const startDate = clean(q.body.startDate) || per.start_date;
   const endDate = clean(q.body.endDate) || per.end_date;
+  const dutyStartDate = clean(q.body.dutyStartDate) || per.duty_start_date || startDate;
+  const dutyEndDate = clean(q.body.dutyEndDate) || per.duty_end_date || endDate;
   const isOpen = q.body.isOpen !== undefined ? (q.body.isOpen === true || q.body.isOpen === 1 || q.body.isOpen === "1" ? 1 : 0) : per.is_open;
   const notes = q.body.notes !== undefined ? clean(q.body.notes) || null : per.notes;
   const sessionConfig = q.body.sessionConfig !== undefined ? (typeof q.body.sessionConfig === "string" ? q.body.sessionConfig : JSON.stringify(q.body.sessionConfig)) : per.session_config;
 
   await db.query(
-    "UPDATE schedule_submission_periods SET title=?, start_date=?, end_date=?, is_open=?, notes=?, session_config=? WHERE id=?",
-    [title, startDate, endDate, isOpen, notes, sessionConfig, per.id]
+    "UPDATE schedule_submission_periods SET title=?, start_date=?, end_date=?, duty_start_date=?, duty_end_date=?, is_open=?, notes=?, session_config=? WHERE id=?",
+    [title, startDate, endDate, dutyStartDate, dutyEndDate, isOpen, notes, sessionConfig, per.id]
   );
   s.json({ success: true, message: isOpen ? "Periode pengajuan diperbarui" : "Periode pengajuan berhasil ditutup" });
 }));
+
+function parsePriorityString(str, yearHint = new Date().getFullYear()) {
+  if (!str) return { date: null, sessionNo: 1, startTime: "08:00", endTime: "12:00" };
+  const isoMatch = str.match(/(\d{4})-(\d{2})-(\d{2})/);
+  let date = null;
+  if (isoMatch) {
+    date = isoMatch[0];
+  } else {
+    const months = {
+      jan: "01", feb: "02", mar: "03", apr: "04", mei: "05", may: "05",
+      jun: "06", jul: "07", agu: "08", aug: "08", sep: "09", okt: "10", oct: "10",
+      nop: "11", nov: "11", des: "12", dec: "12"
+    };
+    const dateMatch = str.match(/(\d{1,2})\s+([a-zA-Z]+)(?:\s+(\d{4}))?/i);
+    if (dateMatch) {
+      const day = String(dateMatch[1]).padStart(2, "0");
+      const monKey = dateMatch[2].slice(0, 3).toLowerCase();
+      const month = months[monKey] || "01";
+      const year = dateMatch[3] || yearHint;
+      date = `${year}-${month}-${day}`;
+    }
+  }
+
+  const sessMatch = str.match(/sesi\s+(\d+|[IVX]+)/i);
+  let sessionNo = 1;
+  if (sessMatch) {
+    const raw = sessMatch[1].toUpperCase();
+    if (raw === "I") sessionNo = 1;
+    else if (raw === "II") sessionNo = 2;
+    else if (raw === "III") sessionNo = 3;
+    else if (raw === "IV") sessionNo = 4;
+    else sessionNo = parseInt(raw, 10) || 1;
+  }
+
+  const timeMatch = str.match(/(\d{1,2}[:.]\d{2})\s*[-–]\s*(\d{1,2}[:.]\d{2})/);
+  let startTime = sessionNo === 1 ? "08:00" : (sessionNo === 2 ? "12:00" : "16:00");
+  let endTime = sessionNo === 1 ? "12:00" : (sessionNo === 2 ? "16:00" : "20:00");
+  if (timeMatch) {
+    startTime = timeMatch[1].replace(".", ":").padStart(5, "0");
+    endTime = timeMatch[2].replace(".", ":").padStart(5, "0");
+  }
+
+  return { date, sessionNo, startTime, endTime };
+}
+
+async function deploySubmissionToSchedule(subId, chosenPriorityNo = 1, adminUser = null) {
+  const [[sub]] = await db.query(
+    `SELECT sub.*, p.name program_name
+     FROM schedule_submissions sub
+     LEFT JOIN programs p ON p.id=sub.program_id
+     WHERE sub.id=?`,
+    [subId]
+  );
+  if (!sub) throw new Error("Pengajuan tidak ditemukan");
+
+  const pNo = [1, 2, 3].includes(+chosenPriorityNo) ? +chosenPriorityNo : (sub.approved_priority || 1);
+  const pStr = sub[`priority_${pNo}`] || sub.priority_1;
+  const pDate = sub[`priority_${pNo}_date`];
+  const pSess = sub[`priority_${pNo}_session`];
+
+  const parsed = parsePriorityString(pStr, sub.year || new Date().getFullYear());
+  const date = pDate || parsed.date;
+  const sessionNo = pSess || parsed.sessionNo || 1;
+  const startTime = parsed.startTime || "08:00";
+  const endTime = parsed.endTime || "12:00";
+  const title = `Pendampingan Sesi ${sessionNo}`;
+  const year = date ? parseInt(String(date).slice(0, 4), 10) : (sub.year || new Date().getFullYear());
+  const pid = sub.program_id || 1;
+
+  if (!date) {
+    throw new Error(`Tanggal pada pilihan prioritas ${pNo} ("${pStr}") tidak dapat ditentukan.`);
+  }
+
+  // 1. Cari atau buat sesi jaga
+  let [[sess]] = await db.query(
+    "SELECT id FROM sessions WHERE program_id=? AND date=? AND session_no=?",
+    [pid, date, sessionNo]
+  );
+
+  if (!sess) {
+    const [res] = await db.query(
+      "INSERT INTO sessions(program_id, year, title, date, session_no, start_time, end_time) VALUES(?,?,?,?,?,?,?)",
+      [pid, year, title, date, sessionNo, startTime, endTime]
+    );
+    sess = { id: res.insertId };
+  }
+
+  // 2. Hubungkan relawan ke sesi (assignments)
+  await db.query("INSERT IGNORE INTO assignments(session_id, user_id) VALUES(?,?)", [sess.id, sub.user_id]);
+
+  // 3. Update pengajuan
+  await db.query(
+    "UPDATE schedule_submissions SET status='disetujui', approved_priority=?, assigned_session_id=?, deployed_at=NOW(), deployed_by=? WHERE id=?",
+    [pNo, sess.id, adminUser?.id || sub.user_id, sub.id]
+  );
+
+  return { sessionId: sess.id, date, sessionNo, startTime, endTime, priorityNo: pNo };
+}
 
 app.get("/api/schedule-submissions", auth(), ah(async (q, s) => {
   const isVol = q.u.role === "relawan";
@@ -2917,8 +3036,14 @@ app.get("/api/schedule-submissions", auth(), ah(async (q, s) => {
   if (q.query.year) { where.push("sub.year=?"); params.push(+q.query.year); }
 
   return paged(q, s, {
-    sel: "sub.*, COALESCE(prog.name, 'Semua Program') program_name, rev.name reviewer_name",
-    from: "FROM schedule_submissions sub LEFT JOIN programs prog ON prog.id=sub.program_id LEFT JOIN users rev ON rev.id=sub.reviewed_by",
+    sel: `sub.*, COALESCE(prog.name, 'Semua Program') program_name,
+          rev.name reviewer_name, dep.name deployer_name,
+          sess.date deployed_date, sess.session_no deployed_session_no`,
+    from: `FROM schedule_submissions sub
+           LEFT JOIN programs prog ON prog.id=sub.program_id
+           LEFT JOIN users rev ON rev.id=sub.reviewed_by
+           LEFT JOIN users dep ON dep.id=sub.deployed_by
+           LEFT JOIN sessions sess ON sess.id=sub.assigned_session_id`,
     where,
     params,
     search: ["sub.name", "sub.nim", "sub.prodi", "sub.priority_1", "sub.priority_2", "sub.priority_3"],
@@ -2957,12 +3082,37 @@ app.post("/api/schedule-submissions", auth("relawan"), ah(async (q, s) => {
     return fail(s, 400, "3 Prioritas pilihan hari dan jam wajib diisi lengkap");
   }
 
+  const p1Parsed = parsePriorityString(p1, year);
+  const p2Parsed = parsePriorityString(p2, year);
+  const p3Parsed = parsePriorityString(p3, year);
+
+  const p1Date = clean(q.body.priority1Date) || p1Parsed.date;
+  const p1Sess = parseInt(q.body.priority1Session, 10) || p1Parsed.sessionNo || 1;
+  const p2Date = clean(q.body.priority2Date) || p2Parsed.date;
+  const p2Sess = parseInt(q.body.priority2Session, 10) || p2Parsed.sessionNo || 1;
+  const p3Date = clean(q.body.priority3Date) || p3Parsed.date;
+  const p3Sess = parseInt(q.body.priority3Session, 10) || p3Parsed.sessionNo || 1;
+
   const [res] = await db.query(
-    `INSERT INTO schedule_submissions(period_id, program_id, user_id, year, name, nim, prodi, semester, priority_1, priority_2, priority_3, reason)
-     VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [period.id, pid, q.u.id, year, name, nim, prodi, semester, p1, p2, p3, reason]
+    `INSERT INTO schedule_submissions(
+       period_id, program_id, user_id, year, name, nim, prodi, semester,
+       priority_1, priority_2, priority_3,
+       priority_1_date, priority_1_session,
+       priority_2_date, priority_2_session,
+       priority_3_date, priority_3_session,
+       reason
+     )
+     VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      period.id, pid, q.u.id, year, name, nim, prodi, semester,
+      p1, p2, p3,
+      p1Date, p1Sess,
+      p2Date, p2Sess,
+      p3Date, p3Sess,
+      reason
+    ]
   );
-  await audit(q.u, pid, "create", "schedule-submission", res.insertId, null, { p1, p2, p3 });
+  await audit(q.u, pid, "create", "schedule-submission", res.insertId, null, { p1, p2, p3, p1Date, p2Date, p3Date });
   s.json({ success: true, message: "Pengajuan sesi jaga reguler berhasil dikirim" });
 }));
 
@@ -2972,13 +3122,105 @@ app.put("/api/schedule-submissions/:id/review", auth("pengurus", "admin"), ah(as
 
   const status = ["disetujui", "ditolak"].includes(q.body.status) ? q.body.status : "disetujui";
   const adminNotes = clean(q.body.adminNotes) || null;
+  const approvedPriority = [1, 2, 3].includes(+q.body.approvedPriority) ? +q.body.approvedPriority : (sub.approved_priority || 1);
+  const shouldDeploy = q.body.deploy === true || q.body.deploy === "true" || q.body.deploy === 1;
 
-  await db.query(
-    "UPDATE schedule_submissions SET status=?, admin_notes=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?",
-    [status, adminNotes, q.u.id, sub.id]
+  let deployResult = null;
+  if (status === "disetujui" && shouldDeploy) {
+    deployResult = await deploySubmissionToSchedule(sub.id, approvedPriority, q.u);
+  } else {
+    await db.query(
+      "UPDATE schedule_submissions SET status=?, approved_priority=?, admin_notes=?, reviewed_by=?, reviewed_at=NOW() WHERE id=?",
+      [status, approvedPriority, adminNotes, q.u.id, sub.id]
+    );
+  }
+
+  await audit(
+    q.u,
+    sub.program_id,
+    "review",
+    "schedule-submission",
+    sub.id,
+    { status: sub.status },
+    { status, adminNotes, approvedPriority, deployed: !!deployResult }
   );
-  await audit(q.u, sub.program_id, "review", "schedule-submission", sub.id, { status: sub.status }, { status, adminNotes });
-  s.json({ success: true, message: `Pengajuan ${status === "disetujui" ? "disetujui" : "ditolak"}` });
+
+  s.json({
+    success: true,
+    message: deployResult
+      ? `Pengajuan disetujui & berhasil dideploy ke Jadwal Resmi (${deployResult.date} Sesi ${deployResult.sessionNo})`
+      : `Pengajuan ${status === "disetujui" ? "disetujui" : "ditolak"}`,
+    data: deployResult,
+  });
+}));
+
+app.post("/api/schedule-submissions/:id/deploy", auth("pengurus", "admin"), ah(async (q, s) => {
+  const [[sub]] = await db.query("SELECT * FROM schedule_submissions WHERE id=?", [q.params.id]);
+  if (!sub || (q.u.role !== "admin" && sub.program_id !== q.u.programId)) return fail(s, 404, "Pengajuan tidak ditemukan");
+
+  const priorityNo = [1, 2, 3].includes(+q.body.priorityNo) ? +q.body.priorityNo : (sub.approved_priority || 1);
+  const deployResult = await deploySubmissionToSchedule(sub.id, priorityNo, q.u);
+
+  await audit(
+    q.u,
+    sub.program_id,
+    "deploy",
+    "schedule-submission",
+    sub.id,
+    null,
+    deployResult,
+    `Deploy pengajuan relawan ${sub.name} (${sub.nim}) ke jadwal ${deployResult.date} Sesi ${deployResult.sessionNo}`
+  );
+
+  s.json({
+    success: true,
+    message: `Pengajuan berhasil dideploy ke Jadwal Resmi (${deployResult.date} Sesi ${deployResult.sessionNo})`,
+    data: deployResult,
+  });
+}));
+
+app.post("/api/schedule-submissions/deploy-all", auth("pengurus", "admin"), ah(async (q, s) => {
+  const pid = scope(q);
+  const where = ["status='disetujui'", "(assigned_session_id IS NULL OR deployed_at IS NULL)"];
+  const params = [];
+  if (pid) { where.push("program_id=?"); params.push(pid); }
+
+  const [subs] = await db.query(
+    `SELECT id, approved_priority, priority_1, priority_2, priority_3 FROM schedule_submissions WHERE ${where.join(" AND ")}`,
+    params
+  );
+
+  if (!subs.length) {
+    return fail(s, 400, "Tidak ada pengajuan disetujui yang belum dideploy ke jadwal");
+  }
+
+  let deployedCount = 0;
+  const errors = [];
+
+  for (const sub of subs) {
+    try {
+      await deploySubmissionToSchedule(sub.id, sub.approved_priority || 1, q.u);
+      deployedCount++;
+    } catch (e) {
+      errors.push({ id: sub.id, error: e.message });
+    }
+  }
+
+  await audit(
+    q.u,
+    pid,
+    "deploy-all",
+    "schedule-submission",
+    null,
+    null,
+    { deployedCount, total: subs.length, errors }
+  );
+
+  s.json({
+    success: true,
+    message: `Berhasil mendeploy ${deployedCount} pengajuan ke Jadwal Resmi!${errors.length ? ` (${errors.length} gagal)` : ""}`,
+    data: { deployedCount, errors },
+  });
 }));
 
 // ---------- import jadwal massal excel ----------

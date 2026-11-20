@@ -51,6 +51,8 @@ export const API_ENDPOINTS = {
     PERIODS: "/schedule-submissions/periods",
     PERIOD_DETAIL: (id) => `/schedule-submissions/periods/${id}`,
     REVIEW: (id) => `/schedule-submissions/${id}/review`,
+    DEPLOY: (id) => `/schedule-submissions/${id}/deploy`,
+    DEPLOY_ALL: "/schedule-submissions/deploy-all",
   },
   ANNOUNCEMENTS: {
     LIST: "/announcements",

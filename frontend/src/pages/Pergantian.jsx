@@ -12,6 +12,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Rocket,
   Settings2,
   Trash2,
   X,
@@ -63,6 +64,9 @@ const DEFAULT_SESSION_CONFIG = {
   priorityCount: 3,
 };
 
+const INDO_DAYS = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"];
+const INDO_MONTHS = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
 const getDynamicShiftOptions = (p) => {
   let cfg = DEFAULT_SESSION_CONFIG;
   if (p?.session_config) {
@@ -70,7 +74,7 @@ const getDynamicShiftOptions = (p) => {
       cfg = typeof p.session_config === "string" ? JSON.parse(p.session_config) : p.session_config;
     } catch (e) {}
   }
-  const days = cfg.days?.length ? cfg.days : ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"];
+  const allowedDays = cfg.days?.length ? cfg.days : ["Senin", "Selasa", "Rabu", "Kamis", "Jumat"];
   const sessList = cfg.sessions?.length
     ? cfg.sessions
     : [
@@ -78,8 +82,37 @@ const getDynamicShiftOptions = (p) => {
         { sessionNo: 2, name: "Sesi 2", startTime: "12:00", endTime: "16:00" },
       ];
 
+  const dutyStart = p?.duty_start_date || p?.start_date;
+  const dutyEnd = p?.duty_end_date || p?.end_date;
+
   const opts = [];
-  days.forEach((day) => {
+  if (dutyStart && dutyEnd) {
+    const start = new Date(dutyStart + "T00:00:00");
+    const end = new Date(dutyEnd + "T00:00:00");
+    if (!isNaN(start) && !isNaN(end) && start <= end) {
+      const cur = new Date(start);
+      let count = 0;
+      while (cur <= end && count < 90) {
+        const dayIdx = cur.getDay();
+        const dayName = INDO_DAYS[dayIdx];
+        if (allowedDays.includes(dayName)) {
+          const d = cur.getDate();
+          const m = INDO_MONTHS[cur.getMonth()];
+          const y = cur.getFullYear();
+          sessList.forEach((s) => {
+            const label = `${dayName}, ${d} ${m} ${y}, ${s.name} (${s.startTime} - ${s.endTime} WIB)`;
+            opts.push({ value: label, label: label });
+          });
+        }
+        cur.setDate(cur.getDate() + 1);
+        count++;
+      }
+    }
+  }
+
+  if (opts.length > 0) return opts;
+
+  allowedDays.forEach((day) => {
     sessList.forEach((s) => {
       const val = `${day}, ${s.name} (${s.startTime} - ${s.endTime} WIB)`;
       opts.push({ value: val, label: val });
@@ -122,6 +155,8 @@ export default function Pergantian() {
     programId: "0",
     startDate: "",
     endDate: "",
+    dutyStartDate: "",
+    dutyEndDate: "",
     isOpen: true,
     notes: "",
     sessionConfig: DEFAULT_SESSION_CONFIG,
@@ -141,6 +176,8 @@ export default function Pergantian() {
   const [regReviewModal, setRegReviewModal] = useState(null);
   const [regReviewStatus, setRegReviewStatus] = useState("disetujui");
   const [regReviewNotes, setRegReviewNotes] = useState("");
+  const [regReviewChosenPriority, setRegReviewChosenPriority] = useState(1);
+  const [regReviewDeployDirectly, setRegReviewDeployDirectly] = useState(true);
 
   const tReguler = usePaginated(API_ENDPOINTS.SCHEDULE_SUBMISSIONS.LIST, { status, programId: pid });
 
@@ -179,6 +216,8 @@ export default function Pergantian() {
         programId: period.program_id ? String(period.program_id) : "0",
         startDate: period.start_date || "",
         endDate: period.end_date || "",
+        dutyStartDate: period.duty_start_date || period.start_date || "",
+        dutyEndDate: period.duty_end_date || period.end_date || "",
         isOpen: period.is_open === 1 || period.is_open === true,
         notes: period.notes || "",
         sessionConfig: cfg,
@@ -189,6 +228,8 @@ export default function Pergantian() {
         programId: "0",
         startDate: "",
         endDate: "",
+        dutyStartDate: "",
+        dutyEndDate: "",
         isOpen: true,
         notes: "",
         sessionConfig: DEFAULT_SESSION_CONFIG,
@@ -242,12 +283,54 @@ export default function Pergantian() {
     const r = await request(
       "put",
       API_ENDPOINTS.SCHEDULE_SUBMISSIONS.REVIEW(regReviewModal.id),
-      { status: regReviewStatus, adminNotes: regReviewNotes },
+      {
+        status: regReviewStatus,
+        adminNotes: regReviewNotes,
+        approvedPriority: regReviewChosenPriority,
+        deploy: regReviewStatus === "disetujui" && regReviewDeployDirectly,
+      },
       { success: true }
     );
     setBusy(false);
     if (r) {
       setRegReviewModal(null);
+      tReguler.reload();
+    }
+  };
+
+  const handleDeploySingle = async (row, priorityNo = null) => {
+    const pNo = priorityNo || row.approved_priority || 1;
+    if (!window.confirm(`Deploy pengajuan relawan "${row.name}" ke jadwal dinas resmi menggunakan Prioritas ${pNo}?`)) return;
+    setBusy(true);
+    const res = await request(
+      "post",
+      API_ENDPOINTS.SCHEDULE_SUBMISSIONS.DEPLOY(row.id),
+      { approvedPriority: pNo },
+      { success: true }
+    );
+    setBusy(false);
+    if (res?.success) {
+      toast.success(res.message || "Pengajuan berhasil di-deploy ke jadwal resmi!");
+      tReguler.reload();
+    }
+  };
+
+  const handleDeployAll = async () => {
+    if (!window.confirm("Yakin ingin mendeploy SEMUA pengajuan berstatus 'Disetujui' yang belum masuk ke jadwal dinas resmi?")) return;
+    setBusy(true);
+    const res = await request(
+      "post",
+      API_ENDPOINTS.SCHEDULE_SUBMISSIONS.DEPLOY_ALL,
+      { programId: pid || undefined },
+      { success: true }
+    );
+    setBusy(false);
+    if (res?.success) {
+      const cnt = res.data?.deployedCount || 0;
+      toast.success(`Berhasil mendeploy ${cnt} pengajuan ke jadwal dinas resmi!`);
+      if (res.data?.errors?.length) {
+        toast.error(`Ada ${res.data.errors.length} pengajuan gagal di-deploy. Pastikan pilihan prioritas memuat tanggal yang valid.`);
+      }
       tReguler.reload();
     }
   };
@@ -354,19 +437,28 @@ export default function Pergantian() {
           {/* Status Periode Pengajuan Banner */}
           {period ? (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 text-emerald-900 shadow-sm text-xs">
-              <div className="flex items-center gap-2.5">
-                <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
-                <div>
-                  <span className="font-extrabold text-emerald-950">
-                    {period.title} Sedang Dibuka!
-                  </span>{" "}
-                  Periode aktif dari <strong>{period.start_date}</strong> s.d. <strong>{period.end_date}</strong>.
-                  {period.program_name && (
-                    <span className="ml-1 rounded bg-emerald-200/60 px-1.5 py-0.5 font-bold text-emerald-900">
-                      {period.program_name}
+              <div className="flex items-start gap-2.5">
+                <CheckCircle2 size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-extrabold text-emerald-950 text-sm">
+                      {period.title} Sedang Dibuka!
                     </span>
-                  )}
-                  {period.notes && <span className="ml-1 text-emerald-700">({period.notes})</span>}
+                    {period.program_name && (
+                      <span className="rounded bg-emerald-200/70 px-2 py-0.5 font-bold text-emerald-900 text-[11px]">
+                        {period.program_name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-emerald-800">
+                    <div>
+                      📅 <strong>Pembukaan Form:</strong> {period.start_date} s.d. {period.end_date}
+                    </div>
+                    <div>
+                      🛡️ <strong>Periode Tugas Jaga:</strong> {period.duty_start_date || period.start_date} s.d. {period.duty_end_date || period.end_date}
+                    </div>
+                  </div>
+                  {period.notes && <div className="text-[11px] text-emerald-700 italic">Catatan: {period.notes}</div>}
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -426,6 +518,17 @@ export default function Pergantian() {
                 <div className="w-full md:w-44">
                   <AppSelect size="sm" isSearchable={false} options={STATUS_OPTIONS} value={status} onChange={setStatus} />
                 </div>
+                {canManage && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={handleDeployAll}
+                    className="btn !bg-emerald-600 hover:!bg-emerald-700 !py-1.5 !px-3 text-xs shadow-sm flex items-center gap-1.5 whitespace-nowrap ml-auto"
+                    title="Deploy semua pengajuan disetujui yang belum masuk ke jadwal dinas resmi"
+                  >
+                    <Rocket size={14} /> Deploy Semua Pengajuan Disetujui
+                  </button>
+                )}
               </>
             }
             columns={[
@@ -443,17 +546,20 @@ export default function Pergantian() {
                 label: "3 Prioritas Pilihan Hari & Jam",
                 render: (r) => (
                   <div className="space-y-1 text-xs">
-                    <div className="flex items-center gap-1.5 font-medium text-slate-800">
-                      <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand">P1</span>
-                      <span>{r.priority_1}</span>
+                    <div className={`flex items-center gap-1.5 font-medium rounded p-1 transition ${r.approved_priority === 1 ? "bg-emerald-50 text-emerald-950 font-bold border border-emerald-200" : "text-slate-800"}`}>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${r.approved_priority === 1 ? "bg-emerald-600 text-white" : "bg-brand-50 text-brand"}`}>P1</span>
+                      <span className="truncate">{r.priority_1}</span>
+                      {r.approved_priority === 1 && <span className="ml-auto text-[10px] font-extrabold text-emerald-700">Disetujui</span>}
                     </div>
-                    <div className="flex items-center gap-1.5 font-medium text-slate-700">
-                      <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">P2</span>
-                      <span>{r.priority_2}</span>
+                    <div className={`flex items-center gap-1.5 font-medium rounded p-1 transition ${r.approved_priority === 2 ? "bg-emerald-50 text-emerald-950 font-bold border border-emerald-200" : "text-slate-700"}`}>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${r.approved_priority === 2 ? "bg-emerald-600 text-white" : "bg-sky-50 text-sky-700"}`}>P2</span>
+                      <span className="truncate">{r.priority_2}</span>
+                      {r.approved_priority === 2 && <span className="ml-auto text-[10px] font-extrabold text-emerald-700">Disetujui</span>}
                     </div>
-                    <div className="flex items-center gap-1.5 font-medium text-slate-600">
-                      <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">P3</span>
-                      <span>{r.priority_3}</span>
+                    <div className={`flex items-center gap-1.5 font-medium rounded p-1 transition ${r.approved_priority === 3 ? "bg-emerald-50 text-emerald-950 font-bold border border-emerald-200" : "text-slate-600"}`}>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${r.approved_priority === 3 ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-600"}`}>P3</span>
+                      <span className="truncate">{r.priority_3}</span>
+                      {r.approved_priority === 3 && <span className="ml-auto text-[10px] font-extrabold text-emerald-700">Disetujui</span>}
                     </div>
                     {r.reason && (
                       <div className="text-[11px] text-slate-400 italic mt-0.5">Alasan: {r.reason}</div>
@@ -470,10 +576,19 @@ export default function Pergantian() {
                 ),
               },
               {
-                label: "Status",
+                label: "Status & Jadwal",
                 render: (r) => (
                   <div>
                     <StatusBadge s={r.status} note={r.admin_notes} />
+                    {r.assigned_session_id ? (
+                      <div className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                        <Check size={11} /> Terdeploy: {r.deployed_date ? String(r.deployed_date).slice(0, 10) : ""} Sesi {r.deployed_session_no || 1}
+                      </div>
+                    ) : r.status === "disetujui" ? (
+                      <div className="mt-1 inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                        Belum Terdeploy
+                      </div>
+                    ) : null}
                     {r.admin_notes && (
                       <div className="mt-1 text-[11px] text-slate-500 max-w-[180px]">Catatan: {r.admin_notes}</div>
                     )}
@@ -485,17 +600,32 @@ export default function Pergantian() {
                     {
                       label: "Aksi",
                       render: (r) => (
-                        <button
-                          type="button"
-                          className="btn-ghost !rounded-lg !px-2.5 !py-1 text-xs"
-                          onClick={() => {
-                            setRegReviewModal(r);
-                            setRegReviewStatus(r.status === "diajukan" ? "disetujui" : r.status);
-                            setRegReviewNotes(r.admin_notes || "");
-                          }}
-                        >
-                          Tinjau Pengajuan
-                        </button>
+                        <div className="flex flex-col gap-1.5">
+                          <button
+                            type="button"
+                            className="btn-ghost !rounded-lg !px-2.5 !py-1 text-xs whitespace-nowrap"
+                            onClick={() => {
+                              setRegReviewModal(r);
+                              setRegReviewStatus(r.status === "diajukan" ? "disetujui" : r.status);
+                              setRegReviewNotes(r.admin_notes || "");
+                              setRegReviewChosenPriority(r.approved_priority || 1);
+                              setRegReviewDeployDirectly(!r.assigned_session_id);
+                            }}
+                          >
+                            Tinjau Pengajuan
+                          </button>
+                          {r.status === "disetujui" && !r.assigned_session_id && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              className="btn !bg-emerald-600 hover:!bg-emerald-700 !rounded-lg !px-2.5 !py-1 text-xs whitespace-nowrap flex items-center justify-center gap-1 shadow-xs"
+                              onClick={() => handleDeploySingle(r)}
+                              title="Deploy pengajuan ini ke sesi dinas jadwal resmi"
+                            >
+                              <Rocket size={12} /> Deploy Jadwal
+                            </button>
+                          )}
+                        </div>
                       ),
                     },
                   ]
@@ -678,40 +808,45 @@ export default function Pergantian() {
           </div>
 
           <div className="space-y-3 pt-1 border-t border-slate-100">
-            <div className="font-bold text-xs uppercase tracking-wider text-slate-500">
-              3 Pilihan Prioritas Jadwal Dinas:
+            <div>
+              <div className="font-bold text-xs uppercase tracking-wider text-slate-500">
+                3 Pilihan Prioritas Jadwal Dinas:
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Pilih tanggal dan sesi jaga yang tersedia sesuai rentang tugas jaga periode aktif.
+              </p>
             </div>
 
             <div>
               <label className="label">Prioritas 1 (Pilihan Utama) *</label>
               <AppSelect
-                isSearchable={false}
+                isSearchable={true}
                 options={getDynamicShiftOptions(period)}
                 value={regulerForm.priority1}
                 onChange={(val) => setRegulerForm({ ...regulerForm, priority1: val })}
-                placeholder="Pilih prioritas 1..."
+                placeholder="Pilih tanggal & sesi prioritas 1..."
               />
             </div>
 
             <div>
               <label className="label">Prioritas 2 *</label>
               <AppSelect
-                isSearchable={false}
+                isSearchable={true}
                 options={getDynamicShiftOptions(period)}
                 value={regulerForm.priority2}
                 onChange={(val) => setRegulerForm({ ...regulerForm, priority2: val })}
-                placeholder="Pilih prioritas 2..."
+                placeholder="Pilih tanggal & sesi prioritas 2..."
               />
             </div>
 
             <div>
               <label className="label">Prioritas 3 *</label>
               <AppSelect
-                isSearchable={false}
+                isSearchable={true}
                 options={getDynamicShiftOptions(period)}
                 value={regulerForm.priority3}
                 onChange={(val) => setRegulerForm({ ...regulerForm, priority3: val })}
-                placeholder="Pilih prioritas 3..."
+                placeholder="Pilih tanggal & sesi prioritas 3..."
               />
             </div>
           </div>
@@ -720,7 +855,7 @@ export default function Pergantian() {
             <label className="label">Catatan / Alasan Khusus (opsional)</label>
             <textarea
               className="input min-h-[72px]"
-              placeholder="Misal: Bentrok jadwal kuliah praktikum pada hari Selasa..."
+              placeholder="Misal: Bentrok jadwal kuliah praktikum pada hari tertentu..."
               value={regulerForm.reason}
               onChange={(e) => setRegulerForm({ ...regulerForm, reason: e.target.value })}
             />
@@ -739,7 +874,7 @@ export default function Pergantian() {
       <Modal
         open={periodModal}
         title="Pengaturan Periode Pengajuan Sesi Reguler"
-        subtitle="Atur tanggal buka dan tutup pengajuan sesi jaga, serta tentukan jumlah sesi dan jam tugas."
+        subtitle="Atur rentang buka pengajuan, rentang dinas jaga relawan, serta konfigurasi sesi dinas."
         onClose={() => setPeriodModal(false)}
         maxWidth="max-w-xl"
       >
@@ -766,20 +901,57 @@ export default function Pergantian() {
             />
           </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div>
-              <label className="label">Tanggal Mulai *</label>
-              <AppDatePicker
-                value={periodForm.startDate}
-                onChange={(val) => setPeriodForm({ ...periodForm, startDate: val })}
-              />
+          {/* 1. Rentang Waktu Pembukaan Form Pengajuan (misal 3 hari) */}
+          <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 space-y-2">
+            <div className="font-bold text-xs text-sky-950 flex items-center gap-1.5">
+              <Calendar size={15} className="text-sky-600" />
+              1. Rentang Waktu Pembukaan Form Pengajuan (Durasi Pengisian Relawan)
             </div>
-            <div>
-              <label className="label">Tanggal Selesai *</label>
-              <AppDatePicker
-                value={periodForm.endDate}
-                onChange={(val) => setPeriodForm({ ...periodForm, endDate: val })}
-              />
+            <p className="text-[11px] text-sky-800">
+              Menentukan kapan formulir pengajuan aktif dan dapat diisi oleh relawan (misal dibuka selama 3 hari).
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 pt-1">
+              <div>
+                <label className="label text-sky-900">Tanggal Buka Form *</label>
+                <AppDatePicker
+                  value={periodForm.startDate}
+                  onChange={(val) => setPeriodForm({ ...periodForm, startDate: val })}
+                />
+              </div>
+              <div>
+                <label className="label text-sky-900">Tanggal Tutup Form *</label>
+                <AppDatePicker
+                  value={periodForm.endDate}
+                  onChange={(val) => setPeriodForm({ ...periodForm, endDate: val })}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Rentang Tanggal Tugas Jaga (Duty Period, misal 30 hari) */}
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 space-y-2">
+            <div className="font-bold text-xs text-emerald-950 flex items-center gap-1.5">
+              <CalendarDays size={15} className="text-emerald-600" />
+              2. Rentang Tanggal Periode Tugas Jaga (Pilihan Tanggal Dinas Relawan)
+            </div>
+            <p className="text-[11px] text-emerald-800">
+              Rentang tanggal dinas jaga yang akan di-generate menjadi pilihan tanggal & sesi prioritas relawan (misal 30 hari).
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 pt-1">
+              <div>
+                <label className="label text-emerald-900">Tanggal Mulai Jaga *</label>
+                <AppDatePicker
+                  value={periodForm.dutyStartDate}
+                  onChange={(val) => setPeriodForm({ ...periodForm, dutyStartDate: val })}
+                />
+              </div>
+              <div>
+                <label className="label text-emerald-900">Tanggal Selesai Jaga *</label>
+                <AppDatePicker
+                  value={periodForm.dutyEndDate}
+                  onChange={(val) => setPeriodForm({ ...periodForm, dutyEndDate: val })}
+                />
+              </div>
             </div>
           </div>
 
@@ -906,7 +1078,7 @@ export default function Pergantian() {
             <label className="label">Catatan Tambahan (opsional)</label>
             <input
               className="input"
-              placeholder="Contoh: Terbuka untuk periode September 2026"
+              placeholder="Contoh: Terbuka untuk periode dinas jaga bulan depan"
               value={periodForm.notes}
               onChange={(e) => setPeriodForm({ ...periodForm, notes: e.target.value })}
             />
@@ -927,16 +1099,28 @@ export default function Pergantian() {
         title="Tinjau Pengajuan Sesi Reguler"
         subtitle={regReviewModal ? `Relawan: ${regReviewModal.name} (${regReviewModal.nim})` : ""}
         onClose={() => setRegReviewModal(null)}
-        maxWidth="max-w-md"
+        maxWidth="max-w-lg"
       >
         {regReviewModal && (
           <form onSubmit={submitRegReview} className="space-y-4">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs space-y-1">
-              <div><strong>Prioritas 1:</strong> {regReviewModal.priority_1}</div>
-              <div><strong>Prioritas 2:</strong> {regReviewModal.priority_2}</div>
-              <div><strong>Prioritas 3:</strong> {regReviewModal.priority_3}</div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs space-y-1.5">
+              <div className="font-bold text-slate-700">Pilihan Prioritas Relawan:</div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-brand-50 px-1.5 py-0.5 text-[10px] font-bold text-brand">P1</span>
+                <span>{regReviewModal.priority_1}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[10px] font-bold text-sky-700">P2</span>
+                <span>{regReviewModal.priority_2}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">P3</span>
+                <span>{regReviewModal.priority_3}</span>
+              </div>
               {regReviewModal.reason && (
-                <div><strong>Alasan Relawan:</strong> {regReviewModal.reason}</div>
+                <div className="mt-1 text-[11px] text-slate-500 italic">
+                  Alasan: {regReviewModal.reason}
+                </div>
               )}
             </div>
 
@@ -968,8 +1152,62 @@ export default function Pergantian() {
               </div>
             </div>
 
+            {regReviewStatus === "disetujui" && (
+              <div className="space-y-3 pt-1">
+                <div>
+                  <label className="label">Pilih Prioritas yang Disetujui *</label>
+                  <div className="space-y-2">
+                    {[1, 2, 3].map((num) => {
+                      const text = regReviewModal[`priority_${num}`];
+                      const isSelected = regReviewChosenPriority === num;
+                      return (
+                        <label
+                          key={num}
+                          className={`flex items-start gap-2.5 rounded-xl border p-2.5 text-xs cursor-pointer transition ${
+                            isSelected
+                              ? "border-emerald-500 bg-emerald-50/80 text-emerald-950 ring-1 ring-emerald-500 font-semibold"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="approvedPriority"
+                            className="mt-0.5 text-emerald-600 focus:ring-emerald-500"
+                            checked={isSelected}
+                            onChange={() => setRegReviewChosenPriority(num)}
+                          />
+                          <div>
+                            <span className="font-bold mr-1.5">Prioritas {num}:</span>
+                            <span>{text}</span>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <label className="flex cursor-pointer items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/80 p-3 text-xs font-semibold text-emerald-950">
+                  <input
+                    type="checkbox"
+                    className="rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500"
+                    checked={regReviewDeployDirectly}
+                    onChange={(e) => setRegReviewDeployDirectly(e.target.checked)}
+                  />
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <Rocket size={14} className="text-emerald-700" />
+                      <span>Langsung Deploy ke Jadwal Resmi (Sessions & Assignments)</span>
+                    </div>
+                    <div className="text-[11px] font-normal text-emerald-800 mt-0.5">
+                      Otomatis membuat sesi penugasan di Jadwal & ST sehingga relawan resmi terdaftar piket.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            )}
+
             <div>
-              <label className="label">Catatan Admin</label>
+              <label className="label">Catatan Admin (opsional)</label>
               <textarea
                 className="input min-h-[72px]"
                 placeholder="Catatan penugasan atau alasan penolakan..."
@@ -981,7 +1219,11 @@ export default function Pergantian() {
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
               <button type="button" className="btn-ghost" onClick={() => setRegReviewModal(null)}>Batal</button>
               <button type="submit" className="btn" disabled={busy}>
-                Simpan Keputusan
+                {busy
+                  ? "Menyimpan..."
+                  : regReviewStatus === "disetujui" && regReviewDeployDirectly
+                  ? "Setujui & Deploy Jadwal"
+                  : "Simpan Keputusan"}
               </button>
             </div>
           </form>
